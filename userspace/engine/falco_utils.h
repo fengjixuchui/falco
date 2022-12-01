@@ -24,7 +24,6 @@ limitations under the License.
 #include <iostream>
 #include <string>
 #include <thread>
-#include <nonstd/string_view.hpp>
 
 #ifdef __GNUC__
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -49,7 +48,7 @@ uint32_t hardware_concurrency();
 namespace network
 {
 static const std::string UNIX_SCHEME("unix://");
-bool is_unix_scheme(nonstd::string_view url);
+bool is_unix_scheme(const std::string& url);
 } // namespace network
 } // namespace utils
 } // namespace falco

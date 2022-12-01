@@ -220,7 +220,7 @@
   items: [probe_rpminfo, probe_rpmverify, probe_rpmverifyfile, probe_rpmverifypackage]
 
 - macro: rpm_procs
-  condition: (proc.name in (rpm_binaries, openscap_rpm_binaries) or proc.name in (salt-minion))
+  condition: (proc.name in (rpm_binaries, openscap_rpm_binaries) or proc.name in (salt-call, salt-minion))
 
 - list: deb_binaries
   items: [dpkg, dpkg-preconfigu, dpkg-reconfigur, dpkg-divert, apt, apt-get, aptitude,
@@ -1441,7 +1441,7 @@
     and not proc.name in (user_mgmt_binaries, userexec_binaries, package_mgmt_binaries,
      cron_binaries, read_sensitive_file_binaries, shell_binaries, hids_binaries,
      vpn_binaries, mail_config_binaries, nomachine_binaries, sshkit_script_binaries,
-     in.proftpd, mandb, salt-minion, postgres_mgmt_binaries,
+     in.proftpd, mandb, salt-call, salt-minion, postgres_mgmt_binaries,
      google_oslogin_
      )
     and not cmp_cp_by_passwd
@@ -3064,7 +3064,7 @@
 
 - rule: Linux Kernel Module Injection Detected
   desc: Detect kernel module was injected (from container).
-  condition: spawned_process and container and proc.name=insmod and not proc.args in (white_listed_modules)
+  condition: spawned_process and container and proc.name=insmod and not proc.args in (white_listed_modules) and thread.cap_effective icontains sys_module
   output: Linux Kernel Module injection using insmod detected (user=%user.name user_loginuid=%user.loginuid parent_process=%proc.pname module=%proc.args %container.info image=%container.image.repository:%container.image.tag)
   priority: WARNING
   tags: [process]
@@ -3240,3 +3240,16 @@
     command=%proc.cmdline pid=%proc.pid file=%fd.name parent=%proc.pname gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4] container_id=%container.id image=%container.image.repository)
   priority: WARNING
   tags: [filesystem, mitre_credential_access, mitre_discovery]
+
+- list: known_ptrace_binaries
+  items: []
+
+- macro: known_ptrace_procs
+  condition: (proc.name in (known_ptrace_binaries))
+
+- rule: PTRACE attached to process
+  desc: "This rule detects an attempt to inject code into a process using PTRACE."
+  condition: evt.type=ptrace and evt.dir=> and evt.arg.request in (5, 6, 11, 20, 27) and proc_name_exists and not known_ptrace_procs
+  output: Detected ptrace PTRACE_ATTACH attempt (proc.cmdline=%proc.cmdline container=%container.info evt.type=%evt.type evt.arg.request=%evt.arg.request proc.pid=%proc.pid proc.cwd=%proc.cwd proc.ppid=%proc.ppid proc.pcmdline=%proc.pcmdline proc.sid=%proc.sid proc.exepath=%proc.exepath user.uid=%user.uid user.loginuid=%user.loginuid user.loginname=%user.loginname user.name=%user.name group.gid=%group.gid group.name=%group.name container.id=%container.id container.name=%container.name image=%container.image.repository)
+  priority: WARNING
+  tags: [process]

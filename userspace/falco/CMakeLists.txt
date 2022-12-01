@@ -62,7 +62,6 @@ set(
   "${PROJECT_SOURCE_DIR}/userspace/engine"
   "${PROJECT_BINARY_DIR}/userspace/falco"
   "${PROJECT_BINARY_DIR}/driver/src"
-  "${STRING_VIEW_LITE_INCLUDE}"
   "${CXXOPTS_INCLUDE_DIR}"
   "${YAMLCPP_INCLUDE_DIR}"
   "${CMAKE_CURRENT_BINARY_DIR}"
@@ -73,7 +72,6 @@ list(APPEND FALCO_INCLUDE_DIRECTORIES "${FALCO_EXTRA_INCLUDE_DIRS}")
 
 set(
   FALCO_DEPENDENCIES
-  string-view-lite
   b64
   cxxopts
 )

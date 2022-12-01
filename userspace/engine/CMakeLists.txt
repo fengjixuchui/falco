@@ -28,7 +28,6 @@ set(FALCO_ENGINE_SOURCE_FILES
     rule_loader_compiler.cpp)
 
 add_library(falco_engine STATIC ${FALCO_ENGINE_SOURCE_FILES})
-add_dependencies(falco_engine njson string-view-lite)
 
 if(USE_BUNDLED_DEPS)
   add_dependencies(falco_engine yamlcpp)
@@ -40,7 +39,6 @@ if(MINIMAL_BUILD)
     PUBLIC
       "${NJSON_INCLUDE}"
       "${TBB_INCLUDE_DIR}"
-      "${STRING_VIEW_LITE_INCLUDE}"
       "${LIBSCAP_INCLUDE_DIRS}"
       "${LIBSINSP_INCLUDE_DIRS}"
       "${YAMLCPP_INCLUDE_DIR}"
@@ -51,7 +49,6 @@ else()
     PUBLIC
       "${NJSON_INCLUDE}"
       "${TBB_INCLUDE_DIR}"
-      "${STRING_VIEW_LITE_INCLUDE}"
       "${LIBSCAP_INCLUDE_DIRS}"
       "${LIBSINSP_INCLUDE_DIRS}"
       "${YAMLCPP_INCLUDE_DIR}"
