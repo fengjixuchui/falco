@@ -50,8 +50,8 @@ application::run_result application::do_inspect(
 		uint64_t duration_to_tot_ns,
 		uint64_t &num_evts)
 {
-	int32_t rc;
-	sinsp_evt* ev;
+	int32_t rc = 0;
+	sinsp_evt* ev = NULL;
 	stats_writer::collector stats_collector(statsw);
 	uint64_t duration_start = 0;
 	uint32_t timeouts_since_last_success_or_msg = 0;
@@ -90,6 +90,11 @@ application::run_result application::do_inspect(
 				m_state->config->m_syscall_evt_drop_max_burst,
 				m_state->config->m_syscall_evt_simulate_drops);
 	}
+
+	//
+	// Start capture
+	//
+	inspector->start_capture();
 
 	//
 	// Loop through the events
