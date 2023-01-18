@@ -23,6 +23,11 @@ using namespace falco::app;
 
 application::run_result application::init_outputs()
 {
+	if (m_state->config->m_outputs.empty())
+	{
+		return run_result::fatal("No output configured, please make sure at least one output is configured and enabled.");
+	}
+
 	// read hostname
 	std::string hostname;
 	char* env_hostname = getenv("FALCO_HOSTNAME");

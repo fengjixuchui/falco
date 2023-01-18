@@ -64,6 +64,11 @@ rule_loader::context::context(const YAML::Node &item,
 	init(parent.name(), position(item.Mark()), item_type, item_name, parent);
 }
 
+rule_loader::context::context(const YAML::Mark &mark, const context& parent)
+{
+	init(parent.name(), position(mark), item_type::VALUE_FOR, "", parent);
+}
+
 rule_loader::context::context(const libsinsp::filter::ast::pos_info& pos,
 			      const std::string& condition,
 			      const context& parent)
@@ -87,9 +92,10 @@ rule_loader::context::context(const libsinsp::filter::ast::pos_info& pos,
 	// parser line/columns are 1-indexed while yaml marks are
 	// 0-indexed, though.
 	position condpos;
-	condpos.pos = pos.idx;
-	condpos.line = pos.line-1;
-	condpos.column = pos.col-1;
+	auto& lastpos = parent.m_locs.back();
+	condpos.pos = pos.idx + lastpos.pos.pos;
+	condpos.line = pos.line + lastpos.pos.line;
+	condpos.column = pos.col + lastpos.pos.column;
 
 	init(name, condpos, rule_loader::context::CONDITION_EXPRESSION, item_name, parent);
 }

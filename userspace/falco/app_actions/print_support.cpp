@@ -16,7 +16,7 @@ limitations under the License.
 
 #include <sys/utsname.h>
 
-#include "falco_engine_version.h"
+#include "versions_info.h"
 #include "application.h"
 
 using namespace falco::app;
@@ -37,35 +37,15 @@ application::run_result application::print_support()
 		nlohmann::json support;
 		struct utsname sysinfo;
 		std::string cmdline;
-		std::unique_ptr<sinsp> s(new sinsp());
-		char driver_api_version_string[32], driver_schema_version_string[32];
 
 		if(uname(&sysinfo) != 0)
 		{
 			return run_result::fatal(string("Could not uname() to find system info: ") + strerror(errno));
 		}
 
-		support["version"] = FALCO_VERSION;
-
-		support["libs_version"] = FALCOSECURITY_LIBS_VERSION;
-		support["plugin_api_version"] = s->get_plugin_api_version();
-		
-		auto driver_api_version = s->get_scap_api_version();
-		unsigned long driver_api_major = PPM_API_VERSION_MAJOR(driver_api_version);
-		unsigned long driver_api_minor = PPM_API_VERSION_MINOR(driver_api_version);
-		unsigned long driver_api_patch = PPM_API_VERSION_PATCH(driver_api_version);
-		snprintf(driver_api_version_string, sizeof(driver_api_version_string), "%lu.%lu.%lu", driver_api_major, driver_api_minor, driver_api_patch);
-
-		support["driver_api_version"] = driver_api_version_string;
-
-		auto driver_schema_version = s->get_scap_schema_version();
-		unsigned long driver_schema_major = PPM_API_VERSION_MAJOR(driver_schema_version);
-		unsigned long driver_schema_minor = PPM_API_VERSION_MINOR(driver_schema_version);
-		unsigned long driver_schema_patch = PPM_API_VERSION_PATCH(driver_schema_version);
-		snprintf(driver_schema_version_string, sizeof(driver_schema_version_string), "%lu.%lu.%lu", driver_schema_major, driver_schema_minor, driver_schema_patch);
-		
-		support["driver_schema_version"] = driver_schema_version_string;
-		support["default_driver_version"] = DRIVER_VERSION;
+		const versions_info infos(m_state->offline_inspector);
+		support["version"] = infos.falco_version;
+		support["engine_info"] = infos.as_json();
 
 		support["system_info"]["sysname"] = sysinfo.sysname;
 		support["system_info"]["nodename"] = sysinfo.nodename;
@@ -73,7 +53,6 @@ application::run_result application::print_support()
 		support["system_info"]["version"] = sysinfo.version;
 		support["system_info"]["machine"] = sysinfo.machine;
 		support["cmdline"] = m_state->cmdline;
-		support["engine_info"]["engine_version"] = FALCO_ENGINE_VERSION;
 		support["config"] = read_file(m_options.conf_filename);
 		support["rules_files"] = nlohmann::json::array();
 		for(auto filename : m_state->config->m_loaded_rules_filenames)
