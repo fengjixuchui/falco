@@ -18,6 +18,7 @@ option(USE_BUNDLED_DEPS "Bundle hard to find dependencies into the Falco binary"
 option(BUILD_WARNINGS_AS_ERRORS "Enable building with -Wextra -Werror flags" OFF)
 option(MINIMAL_BUILD "Build a minimal version of Falco, containing only the engine and basic input/output (EXPERIMENTAL)" OFF)
 option(MUSL_OPTIMIZED_BUILD "Enable if you want a musl optimized build" OFF)
+option(BUILD_FALCO_UNIT_TESTS "Build falco unit tests" OFF)
 
 # gVisor is currently only supported on Linux x86_64
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
@@ -148,16 +149,7 @@ include(falcosecurity-libs)
 include(jq)
 
 # nlohmann-json
-set(NJSON_SRC "${PROJECT_BINARY_DIR}/njson-prefix/src/njson")
-message(STATUS "Using bundled nlohmann-json in '${NJSON_SRC}'")
-set(NJSON_INCLUDE "${NJSON_SRC}/single_include")
-ExternalProject_Add(
-  njson
-  URL "https://github.com/nlohmann/json/archive/v3.3.0.tar.gz"
-  URL_HASH "SHA256=2fd1d207b4669a7843296c41d3b6ac5b23d00dec48dba507ba051d14564aa801"
-  CONFIGURE_COMMAND ""
-  BUILD_COMMAND ""
-  INSTALL_COMMAND "")
+include(njson)
 
 # b64
 include(b64)
@@ -201,7 +193,7 @@ if(NOT MINIMAL_BUILD)
 endif()
 
 # Rules
-add_subdirectory(rules)
+include(rules)
 
 # Dockerfiles
 add_subdirectory(docker)
@@ -222,11 +214,16 @@ set(FALCO_BIN_DIR bin)
 add_subdirectory(scripts)
 add_subdirectory(userspace/engine)
 add_subdirectory(userspace/falco)
-add_subdirectory(tests)
 
 if(NOT MUSL_OPTIMIZED_BUILD)
   include(plugins)
 endif()
 
+include(falcoctl)
+
 # Packages configuration
 include(CPackConfig)
+
+if(BUILD_FALCO_UNIT_TESTS)
+  add_subdirectory(unit_tests)
+endif()
