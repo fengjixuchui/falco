@@ -208,8 +208,9 @@ static falco::app::run_result do_inspect(
 		}
 		else if(falco::app::g_restart_signal.triggered())
 		{
-			falco::app::g_restart_signal.handle([&](){
+			falco::app::g_restart_signal.handle([&s](){
 				falco_logger::log(LOG_INFO, "SIGHUP received, restarting...\n");
+				s.restart.store(true);
 			});
 			break;
 		}
@@ -410,6 +411,12 @@ falco::app::run_result falco::app::actions::process_events(falco::app::state& s)
 	// Initialize stats writer
 	auto statsw = init_stats_writer(s.options);
 
+	if (s.options.dry_run)
+	{
+		falco_logger::log(LOG_DEBUG, "Skipping event processing in dry-run\n");
+		return run_result::ok();
+	}
+
 	// Start processing events
 	if(s.is_capture_mode())
 	{
@@ -487,7 +494,7 @@ falco::app::run_result falco::app::actions::process_events(falco::app::state& s)
 
 		// wait for event processing to terminate for all sources
 		// if a thread terminates with an error, we trigger the app termination
-		// to force all other event streams to termiante too.
+		// to force all other event streams to terminate too.
 		// We accomulate the errors in a single run_result.
 		size_t closed_count = 0;
 		while (closed_count < ctxs.size())

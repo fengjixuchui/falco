@@ -18,6 +18,8 @@ limitations under the License.
 #include "../configuration.h"
 #include "config_falco.h"
 
+#include <cxxopts.hpp>
+
 #include <fstream>
 
 namespace falco {
@@ -34,10 +36,8 @@ options::options()
 	  list_plugins(false),
 	  list_syscall_events(false),
 	  markdown(false),
-	  modern_bpf(false),
-	  m_cmdline_opts("falco", "Falco - Cloud Native Runtime Security")
+	  modern_bpf(false)
 {
-	define();
 }
 
 options::~options()
@@ -46,8 +46,13 @@ options::~options()
 
 bool options::parse(int argc, char **argv, std::string &errstr)
 {
+	cxxopts::Options opts("falco", "Falco - Cloud Native Runtime Security");
+	define(opts);
+	m_usage_str = opts.help();
+
+	cxxopts::ParseResult m_cmdline_parsed;
 	try {
-		m_cmdline_parsed = m_cmdline_opts.parse(argc, argv);
+		m_cmdline_parsed = opts.parse(argc, argv);
 	}
 	catch (std::exception &e)
 	{
@@ -145,14 +150,14 @@ bool options::parse(int argc, char **argv, std::string &errstr)
 	return true;
 }
 
-std::string options::usage()
+const std::string& options::usage()
 {
-	return m_cmdline_opts.help();
+	return m_usage_str;
 }
 
-void options::define()
+void options::define(cxxopts::Options& opts)
 {
-	m_cmdline_opts.add_options()
+	opts.add_options()
 		("h,help",                        "Print this page", cxxopts::value(help)->default_value("false"))
 #ifdef BUILD_TYPE_RELEASE
 		("c",                             "Configuration file. If not specified uses " FALCO_INSTALL_CONF_FILE ".", cxxopts::value(conf_filename), "<path>")
@@ -165,6 +170,7 @@ void options::define()
 		("d,daemon",                      "Run as a daemon.", cxxopts::value(daemon)->default_value("false"))
 		("disable-cri-async",             "Disable asynchronous CRI metadata fetching. This is useful to let the input event wait for the container metadata fetch to finish before moving forward. Async fetching, in some environments leads to empty fields for container metadata when the fetch is not fast enough to be completed asynchronously. This can have a performance penalty on your environment depending on the number of containers and the frequency at which they are created/started/stopped.", cxxopts::value(disable_cri_async)->default_value("false"))
 		("disable-source",                "Disable a specific event source. By default, all loaded sources get enabled. Available sources are 'syscall' and all sources defined by loaded plugins supporting the event sourcing capability. This option can be passed multiple times. This has no offect when reading events from a trace file. Can not disable all event sources. Can not be mixed with --enable-source.", cxxopts::value(disable_sources), "<event_source>")
+		("dry-run",                       "Run Falco without proceesing events. Can be useful for checking that the configuration and rules do not have any errors.", cxxopts::value(dry_run)->default_value("false"))
 		("D",                             "Disable any rules with names having the substring <substring>. This option can be passed multiple times. Can not be mixed with -t.", cxxopts::value(disabled_rule_substrings), "<substring>")
 		("e",                             "Read the events from a trace file <events_file> in .scap format instead of tapping into live.", cxxopts::value(trace_filename), "<events_file>")
 		("enable-source",                 "Enable a specific event source. If used, all loaded sources get disabled by default and only the ones passed with this option get enabled. Available sources are 'syscall' and all sources defined by loaded plugins supporting the event sourcing capability. This option can be passed multiple times. This has no offect when reading events from a trace file. Can not be mixed with --disable-source.", cxxopts::value(enable_sources), "<event_source>")
@@ -214,7 +220,7 @@ void options::define()
 		("page-size",                     "Print the system page size (may help you to choose the right syscall ring-buffer size).", cxxopts::value(print_page_size)->default_value("false"));
 
 
-	m_cmdline_opts.set_width(140);
+	opts.set_width(140);
 }
 
 }; // namespace app
