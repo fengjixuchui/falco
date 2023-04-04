@@ -57,7 +57,8 @@ falco_configuration::falco_configuration():
 	m_metadata_download_chunk_wait_us(1000),
 	m_metadata_download_watch_freq_sec(1),
 	m_syscall_buf_size_preset(4),
-	m_cpus_for_each_syscall_buffer(2)
+	m_cpus_for_each_syscall_buffer(2),
+	m_syscall_drop_failed_exit(false)
 {
 }
 
@@ -176,6 +177,22 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 		std::string user_agent;
 		user_agent = config.get_scalar<std::string>("http_output.user_agent","falcosecurity/falco");
 		http_output.options["user_agent"] = user_agent;
+
+		bool insecure;
+		insecure = config.get_scalar<bool>("http_output.insecure", false);
+		http_output.options["insecure"] = insecure? std::string("true") : std::string("false");
+		
+		std::string ca_cert;
+		ca_cert = config.get_scalar<std::string>("http_output.ca_cert", "");
+		http_output.options["ca_cert"] = ca_cert;
+
+		std::string ca_bundle;
+		ca_bundle = config.get_scalar<std::string>("http_output.ca_bundle", "");
+		http_output.options["ca_bundle"] = ca_bundle;
+
+		std::string ca_path;
+		ca_path = config.get_scalar<std::string>("http_output.ca_path", "/etc/ssl/certs");
+		http_output.options["ca_path"] = ca_path;
 
 		m_outputs.push_back(http_output);
 	}
@@ -313,8 +330,11 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 
 	m_cpus_for_each_syscall_buffer = config.get_scalar<uint16_t>("modern_bpf.cpus_for_each_syscall_buffer", 2);
 
-	m_base_syscalls.clear();
-	config.get_sequence<std::unordered_set<std::string>>(m_base_syscalls, std::string("base_syscalls"));
+	m_syscall_drop_failed_exit = config.get_scalar<bool>("syscall_drop_failed_exit", false);
+
+	m_base_syscalls_custom_set.clear();
+	config.get_sequence<std::unordered_set<std::string>>(m_base_syscalls_custom_set, std::string("base_syscalls.custom_set"));
+	m_base_syscalls_repair = config.get_scalar<bool>("base_syscalls.repair", false);
 
 	std::set<std::string> load_plugins;
 

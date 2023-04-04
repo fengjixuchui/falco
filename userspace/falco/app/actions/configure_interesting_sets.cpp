@@ -71,21 +71,21 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 	}
 
 	/* DEFAULT OPTION:
-	* Current sinsp_state_sc_set() approach includes multiple steps:
+	* Current `sinsp_state_sc_set()` approach includes multiple steps:
 	* (1) Enforce all positive syscalls from each Falco rule
-	* (2) Enforce static `libsinsp` state set (non-adaptive, not conditioned by rules,
+	* (2) Enforce static Falco state set (non-adaptive, not conditioned by rules,
 	* but based on PPME event table flags indicating generic sinsp state modifications)
 	* -> Final set is union of (1) and (2)
 	*
-	* Fall-back if no valid positive syscalls in "base_syscalls",
-	* e.g. when using "base_syscalls" only for negative syscalls.
+	* Fall-back if no valid positive syscalls in `base_syscalls.custom_set`,
+	* e.g. when using `base_syscalls.custom_set` only for negative syscalls.
 	*/
 	auto base_sc_set = libsinsp::events::sinsp_state_sc_set();
 
-	/* USER OVERRIDE INPUT OPTION "base_syscalls". */
+	/* USER OVERRIDE INPUT OPTION `base_syscalls.custom_set` etc. */
 	std::unordered_set<std::string> user_positive_names = {};
 	std::unordered_set<std::string> user_negative_names = {};
-	extract_base_syscalls_names(s.config->m_base_syscalls, user_positive_names, user_negative_names);
+	extract_base_syscalls_names(s.config->m_base_syscalls_custom_set, user_positive_names, user_negative_names);
 	auto user_positive_sc_set = libsinsp::events::names_to_sc_set(user_positive_names);
 	auto user_negative_sc_set = libsinsp::events::names_to_sc_set(user_negative_names);
 
@@ -100,11 +100,30 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 		falco_logger::log(LOG_DEBUG, "+(" + std::to_string(user_positive_sc_set_names.size())
 			+ ") syscalls added (base_syscalls override): "
 			+ concat_set_in_order(user_positive_sc_set_names) + "\n");
+		auto invalid_positive_sc_set_names = unordered_set_difference(user_positive_names, user_positive_sc_set_names);
+		if (!invalid_positive_sc_set_names.empty())
+		{
+			falco_logger::log(LOG_WARNING, "Invalid (positive) syscall names: warning (base_syscalls override): "
+				+ concat_set_in_order(invalid_positive_sc_set_names));
+		}
 	}
 
 	// selected events are the union of the rules events set and the
 	// base events set (either the default or the user-defined one)
 	s.selected_sc_set = rules_sc_set.merge(base_sc_set);
+
+	/* REPLACE DEFAULT STATE, nothing else. Need to override s.selected_sc_set and have a separate logic block. */
+	if (s.config->m_base_syscalls_repair && user_positive_sc_set.empty())
+	{
+		/* If `base_syscalls.repair` is specified, but `base_syscalls.custom_set` is empty we are replacing
+		 * the default `sinsp_state_sc_set()` enforcement with the alternative `sinsp_repair_state_sc_set`.
+		 * This approach only activates additional syscalls Falco needs beyond the
+		 * syscalls defined in each Falco rule that are absolutely necessary based
+		 * on the current rules configuration. */
+
+		// returned set already has rules_sc_set merged
+		s.selected_sc_set = libsinsp::events::sinsp_repair_state_sc_set(rules_sc_set);
+	}
 
 	if (!user_negative_sc_set.empty())
 	{
@@ -117,6 +136,12 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 		falco_logger::log(LOG_DEBUG, "-(" + std::to_string(user_negative_sc_set_names.size())
 			+ ") syscalls removed (base_syscalls override): "
 			+ concat_set_in_order(user_negative_sc_set_names) + "\n");
+		auto invalid_negative_sc_set_names = unordered_set_difference(user_negative_names, user_negative_sc_set_names);
+		if (!invalid_negative_sc_set_names.empty())
+		{
+			falco_logger::log(LOG_WARNING, "Invalid (negative) syscall names: warning (base_syscalls override): "
+				+ concat_set_in_order(invalid_negative_sc_set_names));
+		}
 	}
 
 	/* Derive the diff between the additional syscalls added via libsinsp state
@@ -149,6 +174,32 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 				+ concat_set_in_order(erased_sc_set_names) + "\n");
 		}
 	}
+
+	/* If a custom set is specified (positive, negative, or both), we attempt
+	 * to repair it if configured to do so. */
+	if (s.config->m_base_syscalls_repair && !s.config->m_base_syscalls_custom_set.empty())
+	{
+		/* If base_syscalls.repair is specified enforce state using `sinsp_repair_state_sc_set`.
+		 * This approach is an alternative to the default `sinsp_state_sc_set()` state enforcement
+		 * and only activates additional syscalls Falco needs beyond the syscalls defined in the
+		 * Falco rules that are absolutely necessary based on the current rules configuration. */
+		auto selected_sc_set = s.selected_sc_set;
+		s.selected_sc_set = libsinsp::events::sinsp_repair_state_sc_set(s.selected_sc_set);
+		auto repaired_sc_set = s.selected_sc_set.diff(selected_sc_set);
+		if (!repaired_sc_set.empty())
+		{
+			auto repaired_sc_set_names = libsinsp::events::sc_set_to_names(repaired_sc_set);
+			falco_logger::log(LOG_INFO, "+(" + std::to_string(repaired_sc_set_names.size())
+				+ ") repaired syscalls: " + concat_set_in_order(repaired_sc_set_names) + "\n");
+		}
+	}
+
+	/* Hidden safety enforcement for `base_syscalls.custom_set` user
+	 * input override option (but keep as general safety enforcement)
+	 * -> sched_process_exit trace point activation (procexit event)
+	 * is necessary for continuous state engine cleanup,
+	 * else memory would grow rapidly and linearly over time. */
+	s.selected_sc_set.insert(ppm_sc_code::PPM_SC_SCHED_PROCESS_EXIT);
 
 	if (!s.selected_sc_set.empty())
 	{
