@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,11 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// The version of rules/filter fields/etc supported by this Falco
-// engine.
-#define FALCO_ENGINE_VERSION (17)
+// The version of this Falco engine.
+#define FALCO_ENGINE_VERSION (23)
 
-// This is the result of running "falco --list -N | sha256sum" and
-// represents the fields supported by this version of Falco. It's used
-// at build time to detect a changed set of fields.
-#define FALCO_FIELDS_CHECKSUM "8684342b994f61ca75a1a494e1197b86b53715c59ad60de3768d4d74ea4ba2c9"
+// This is the result of running the following command:
+//   FALCO="falco -c ./falco.yaml"
+//   echo $($FALCO --version | grep 'Engine:' | awk '{print $2}') $(echo $($FALCO --version | grep 'Schema version:' | awk '{print $3}') $($FALCO --list --markdown | grep '^`' | sort) $($FALCO --list-syscall-events | sort) | sha256sum)
+// It represents the fields supported by this version of Falco,
+// the event types, and the underlying driverevent schema. It's used to
+// detetect changes in engine version in our CI jobs.
+#define FALCO_ENGINE_CHECKSUM "fc01e84426728f6adc67fd7e7eca3d33b0dfc21c7dde14435cc88376dbaf04c5"

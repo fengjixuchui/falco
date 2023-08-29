@@ -15,6 +15,8 @@ limitations under the License.
 */
 
 #include "actions.h"
+#include "helpers.h"
+#include "../app.h"
 
 using namespace falco::app;
 using namespace falco::app::actions;
@@ -44,7 +46,7 @@ static void check_for_rules_unsupported_events(falco::app::state& s, const libsi
 {
 	/* Unsupported events are those events that are used in the rules
 	 * but that are not part of the selected event set. For now, this
-	 * is expected to happen only for high volume I/O syscalls for
+	 * is expected to happen only for high volume syscalls for
 	 * performance reasons. */
 	auto unsupported_sc_set = rules_sc_set.diff(s.selected_sc_set);
 	if (unsupported_sc_set.empty())
@@ -55,7 +57,7 @@ static void check_for_rules_unsupported_events(falco::app::state& s, const libsi
 	/* Get the names of the events (syscall and non syscall events) that were not activated and print them. */
 	auto names = libsinsp::events::sc_set_to_event_names(unsupported_sc_set);
 	std::cerr << "Loaded rules match syscalls that are not activated (e.g. were removed via config settings such as no -A flag or negative base_syscalls elements) or unsupported with current configuration: warning (unsupported-evttype): " + concat_set_in_order(names) << std::endl;
-	std::cerr << "If syscalls in rules include high volume I/O syscalls (-> activate via `-A` flag), else syscalls may have been removed via base_syscalls option or might be associated with syscalls undefined on your architecture (https://marcin.juszkiewicz.com.pl/download/tables/syscalls.html)" << std::endl;
+	std::cerr << "If syscalls in rules include high volume syscalls (-> activate via `-A` flag), else syscalls may have been removed via base_syscalls option or might be associated with syscalls undefined on your architecture (https://marcin.juszkiewicz.com.pl/download/tables/syscalls.html)" << std::endl;
 }
 
 static void select_event_set(falco::app::state& s, const libsinsp::events::set<ppm_sc_code>& rules_sc_set)
@@ -89,6 +91,7 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 	auto user_positive_sc_set = libsinsp::events::event_names_to_sc_set(user_positive_names);
 	auto user_negative_sc_set = libsinsp::events::event_names_to_sc_set(user_negative_names);
 
+	auto user_positive_sc_set_names = libsinsp::events::sc_set_to_event_names(user_positive_sc_set);
 	if (!user_positive_sc_set.empty())
 	{
 		// user overrides base event set
@@ -96,16 +99,15 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 
 		// we re-transform from sc_set to names to make
 		// sure that bad user inputs are ignored
-		auto user_positive_sc_set_names = libsinsp::events::sc_set_to_event_names(user_positive_sc_set);
 		falco_logger::log(LOG_DEBUG, "+(" + std::to_string(user_positive_sc_set_names.size())
 			+ ") syscalls added (base_syscalls override): "
 			+ concat_set_in_order(user_positive_sc_set_names) + "\n");
-		auto invalid_positive_sc_set_names = unordered_set_difference(user_positive_names, user_positive_sc_set_names);
-		if (!invalid_positive_sc_set_names.empty())
-		{
-			falco_logger::log(LOG_WARNING, "Invalid (positive) syscall names: warning (base_syscalls override): "
-				+ concat_set_in_order(invalid_positive_sc_set_names));
-		}
+	}
+	auto invalid_positive_sc_set_names = unordered_set_difference(user_positive_names, user_positive_sc_set_names);
+	if (!invalid_positive_sc_set_names.empty())
+	{
+		falco_logger::log(LOG_WARNING, "Invalid (positive) syscall names: warning (base_syscalls override): "
+			+ concat_set_in_order(invalid_positive_sc_set_names));
 	}
 
 	// selected events are the union of the rules events set and the
@@ -125,6 +127,7 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 		s.selected_sc_set = libsinsp::events::sinsp_repair_state_sc_set(rules_sc_set);
 	}
 
+	auto user_negative_sc_set_names = libsinsp::events::sc_set_to_event_names(user_negative_sc_set);
 	if (!user_negative_sc_set.empty())
 	{
 		/* Remove negative base_syscalls events. */
@@ -132,16 +135,15 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 
 		// we re-transform from sc_set to names to make
 		// sure that bad user inputs are ignored
-		auto user_negative_sc_set_names = libsinsp::events::sc_set_to_event_names(user_negative_sc_set);
 		falco_logger::log(LOG_DEBUG, "-(" + std::to_string(user_negative_sc_set_names.size())
 			+ ") syscalls removed (base_syscalls override): "
 			+ concat_set_in_order(user_negative_sc_set_names) + "\n");
-		auto invalid_negative_sc_set_names = unordered_set_difference(user_negative_names, user_negative_sc_set_names);
-		if (!invalid_negative_sc_set_names.empty())
-		{
-			falco_logger::log(LOG_WARNING, "Invalid (negative) syscall names: warning (base_syscalls override): "
-				+ concat_set_in_order(invalid_negative_sc_set_names));
-		}
+	}
+	auto invalid_negative_sc_set_names = unordered_set_difference(user_negative_names, user_negative_sc_set_names);
+	if (!invalid_negative_sc_set_names.empty())
+	{
+		falco_logger::log(LOG_WARNING, "Invalid (negative) syscall names: warning (base_syscalls override): "
+			+ concat_set_in_order(invalid_negative_sc_set_names));
 	}
 
 	/* Derive the diff between the additional syscalls added via libsinsp state
@@ -158,12 +160,12 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 
 	/* -A flag behavior:
 	 * (1) default: all syscalls in rules included, sinsp state enforcement
-	       without high volume I/O syscalls
+	       without high volume syscalls
 	 * (2) -A flag set: all syscalls in rules included, sinsp state enforcement
-	       and allowing high volume I/O syscalls */
+	       and allowing high volume syscalls */
 	if(!s.options.all_events)
 	{
-		auto ignored_sc_set = libsinsp::events::io_sc_set();
+		auto ignored_sc_set = falco::app::ignored_sc_set();
 		auto erased_sc_set = s.selected_sc_set.intersect(ignored_sc_set);
 		s.selected_sc_set = s.selected_sc_set.diff(ignored_sc_set);
 		if (!erased_sc_set.empty())
@@ -212,6 +214,7 @@ static void select_event_set(falco::app::state& s, const libsinsp::events::set<p
 
 falco::app::run_result falco::app::actions::configure_interesting_sets(falco::app::state& s)
 {
+#ifdef __linux__
 	if (s.engine == nullptr || s.config == nullptr)
 	{
 		return run_result::fatal("Broken 'configure_interesting_sets' preconditions: engine and config must be non-null");
@@ -230,5 +233,7 @@ falco::app::run_result falco::app::actions::configure_interesting_sets(falco::ap
 	auto rules_sc_set = s.engine->sc_codes_for_ruleset(falco_common::syscall_source);
 	select_event_set(s, rules_sc_set);
 	check_for_rules_unsupported_events(s, rules_sc_set);
+
+#endif
 	return run_result::ok();
 }

@@ -17,10 +17,8 @@ limitations under the License.
 
 #include <falco_engine.h>
 
-#include <falco/app/state.h>
-#include <falco/app/actions/actions.h>
-
-#include <gtest/gtest.h>
+#include <falco/app/app.h>
+#include "app_action_helpers.h"
 
 #define ASSERT_NAMES_EQ(a, b) { \
 	EXPECT_EQ(_order(a).size(), _order(b).size()); \
@@ -100,7 +98,7 @@ TEST(ConfigureInterestingSets, engine_codes_syscalls_set)
 	auto rules_event_set = engine->event_codes_for_ruleset(s_sample_source);
 	auto rules_event_names = libsinsp::events::event_set_to_names(rules_event_set);
 	ASSERT_NAMES_EQ(rules_event_names, strset_t({
-		"connect", "accept", "accept4", "umount2", "open", "ptrace", "mmap", "execve", "read", "container"}));
+		"connect", "accept", "accept4", "umount2", "open", "ptrace", "mmap", "execve", "read", "container", "asyncevent"}));
 
 	// test if sc code names were extracted from each rule in test ruleset.
 	// note, this is not supposed to contain "container", as that's an event
@@ -160,7 +158,7 @@ TEST(ConfigureInterestingSets, engine_codes_nonsyscalls_set)
 	auto generic_names = libsinsp::events::event_set_to_names({ppm_event_code::PPME_GENERIC_E});
 	auto expected_names = strset_t({
 		"connect", "accept", "accept4", "umount2", "open", "ptrace", "mmap", "execve", "read", "container", // ruleset
-		"procexit", "switch", "pluginevent"}); // from non-syscall event filters
+		"procexit", "switch", "pluginevent", "asyncevent"}); // from non-syscall event filters
 	expected_names.insert(generic_names.begin(), generic_names.end());
 	ASSERT_NAMES_EQ(rules_event_names, expected_names);
 
@@ -199,14 +197,14 @@ TEST(ConfigureInterestingSets, selection_not_allevents)
 	ASSERT_NAMES_CONTAIN(selected_sc_names, expected_sc_names);
 
 	// check that all IO syscalls have been erased from the selection
-	auto io_set = libsinsp::events::io_sc_set();
-	auto erased_sc_names = libsinsp::events::sc_set_to_event_names(io_set);
+	auto ignored_set = falco::app::ignored_sc_set();
+	auto erased_sc_names = libsinsp::events::sc_set_to_event_names(ignored_set);
 	ASSERT_NAMES_NOCONTAIN(selected_sc_names, erased_sc_names);
 
 	// check that final selected set is exactly sinsp state + ruleset
 	auto rule_set = s2.engine->sc_codes_for_ruleset(s_sample_source, s_sample_ruleset);
 	auto state_set = libsinsp::events::sinsp_state_sc_set();
-	for (const auto &erased : io_set)
+	for (const auto &erased : ignored_set)
 	{
 		rule_set.remove(erased);
 		state_set.remove(erased);
@@ -273,7 +271,7 @@ TEST(ConfigureInterestingSets, selection_generic_evts)
 		"socket", "bind", "close" // from sinsp state set (network, files)
 	});
 	ASSERT_NAMES_CONTAIN(selected_sc_names, expected_sc_names);
-	auto unexpected_sc_names = libsinsp::events::sc_set_to_event_names(libsinsp::events::io_sc_set());
+	auto unexpected_sc_names = libsinsp::events::sc_set_to_event_names(falco::app::ignored_sc_set());
 	ASSERT_NAMES_NOCONTAIN(selected_sc_names, unexpected_sc_names);
 }
 
@@ -361,7 +359,7 @@ TEST(ConfigureInterestingSets, selection_custom_base_set)
 		"connect", "accept", "accept4", "umount2", "open", "ptrace", "mmap", "execve", "procexit"
 	});
 	ASSERT_NAMES_EQ(selected_sc_names, expected_sc_names);
-	auto unexpected_sc_names = libsinsp::events::sc_set_to_event_names(libsinsp::events::io_sc_set());
+	auto unexpected_sc_names = libsinsp::events::sc_set_to_event_names(falco::app::ignored_sc_set());
 	ASSERT_NAMES_NOCONTAIN(selected_sc_names, unexpected_sc_names);
 }
 
@@ -389,7 +387,7 @@ TEST(ConfigureInterestingSets, selection_custom_base_set_repair)
 		"bind", "socket", "clone3", "close", "setuid"
 	});
 	ASSERT_NAMES_CONTAIN(selected_sc_names, expected_sc_names);
-	auto unexpected_sc_names = libsinsp::events::sc_set_to_event_names(libsinsp::events::io_sc_set());
+	auto unexpected_sc_names = libsinsp::events::sc_set_to_event_names(falco::app::ignored_sc_set());
 	ASSERT_NAMES_NOCONTAIN(selected_sc_names, unexpected_sc_names);
 }
 
@@ -417,4 +415,14 @@ TEST(ConfigureInterestingSets, selection_empty_custom_base_set_repair)
 	auto s7_state_set = libsinsp::events::sinsp_repair_state_sc_set(s7_rules_set);
 	ASSERT_EQ(s7.selected_sc_set, s7_state_set);
 	ASSERT_EQ(s7.selected_sc_set.size(), s7_state_set.size());
+}
+
+TEST(ConfigureInterestingSets, ignored_set_expected_size)
+{
+	// unit test fence to make sure we don't have unexpected regressions
+	// in the ignored set, to be updated in the future
+	ASSERT_EQ(falco::app::ignored_sc_set().size(), 14);
+
+	// we don't expect to ignore any syscall in the default base set
+	ASSERT_EQ(falco::app::ignored_sc_set().intersect(libsinsp::events::sinsp_state_sc_set()).size(), 0);
 }

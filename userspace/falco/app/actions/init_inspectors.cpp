@@ -58,7 +58,7 @@ static void init_syscall_inspector(falco::app::state& s, std::shared_ptr<sinsp> 
 }
 
 static bool populate_filterchecks(
-		std::shared_ptr<sinsp> inspector,
+		const std::shared_ptr<sinsp>& inspector,
 		const std::string& source,
 		filter_check_list& filterchecks,
 		std::unordered_set<std::string>& used_plugins,
@@ -118,12 +118,10 @@ falco::app::run_result falco::app::actions::init_inspectors(falco::app::state& s
 			? s.offline_inspector
 			: std::make_shared<sinsp>();
 
-		// handle syscall and plugin sources differently
-		// todo(jasondellaluce): change this once we support extracting plugin fields from syscalls too
+		// do extra preparation for the syscall source
 		if (src == falco_common::syscall_source)
 		{
 			init_syscall_inspector(s, src_info->inspector);
-			continue;
 		}
 
 		// load and init all plugins compatible with this event source
@@ -132,7 +130,9 @@ falco::app::run_result falco::app::actions::init_inspectors(falco::app::state& s
 		{
 			std::shared_ptr<sinsp_plugin> plugin = nullptr;
 			auto config = s.plugin_configs.at(p->name());
-			auto is_input = p->caps() & CAP_SOURCING && p->event_source() == src;
+			auto is_input = (p->caps() & CAP_SOURCING)
+				&& ((p->id() != 0 && src == p->event_source())
+					|| (p->id() == 0 && src == falco_common::syscall_source));
 
 			if (s.is_capture_mode())
 			{
@@ -146,7 +146,10 @@ falco::app::run_result falco::app::actions::init_inspectors(falco::app::state& s
 				// event source, we must register the plugin supporting
 				// that event source and also plugins with field extraction
 				// capability that are compatible with that event source
-				if (is_input || (p->caps() & CAP_EXTRACTION && p->is_source_compatible(src)))
+				if (is_input
+					|| (p->caps() & CAP_EXTRACTION && sinsp_plugin::is_source_compatible(p->extract_event_sources(), src))
+					|| (p->caps() & CAP_PARSING && sinsp_plugin::is_source_compatible(p->parse_event_sources(), src))
+					|| (p->caps() & CAP_ASYNC && sinsp_plugin::is_source_compatible(p->async_event_sources(), src)))
 				{
 					plugin = src_info->inspector->register_plugin(config->m_library_path);
 				}
@@ -156,14 +159,19 @@ falco::app::run_result falco::app::actions::init_inspectors(falco::app::state& s
 			// (in capture mode, this is true for every plugin)
 			if (plugin)
 			{
-				if (!plugin->init(config->m_init_config, err))
+				// avoid initializing the same plugin twice in the same
+				// inspector if we're in capture mode
+				if (!s.is_capture_mode() || used_plugins.find(p->name()) == used_plugins.end())
 				{
-					return run_result::fatal(err);
+					if (!plugin->init(config->m_init_config, err))
+					{
+						return run_result::fatal(err);
+					}
 				}
 				if (is_input)
 				{
 					auto gen_check = src_info->inspector->new_generic_filtercheck();
-					src_info->filterchecks.add_filter_check(gen_check);
+					src_info->filterchecks->add_filter_check(gen_check);
 				}
 				used_plugins.insert(plugin->name());
 			}
@@ -173,24 +181,37 @@ falco::app::run_result falco::app::actions::init_inspectors(falco::app::state& s
 		if (!populate_filterchecks(
 				src_info->inspector,
 				src,
-				src_info->filterchecks,
+				*src_info->filterchecks.get(),
 				used_plugins,
 				err))
 		{
 			return run_result::fatal(err);
-		}	
+		}
 
+		// in live mode, each inspector should have registered at most two event sources:
+		// the "syscall" on, loaded at default at index 0, and optionally another
+		// one defined by a plugin, at index 1
+		if (!s.is_capture_mode())
+		{
+			const auto& sources = src_info->inspector->event_sources();
+			if (sources.size() == 0 || sources.size() > 2 || sources[0] != falco_common::syscall_source)
+			{
+				std::string err;
+				for (const auto &s : sources)
+				{
+					err += (err.empty() ? "" : ", ") + s;
+				}
+				return run_result::fatal("Illegal sources setup in live inspector for source '" + src + "': " + err);
+			}
+		}
 	}
 
-	// check if some plugin with field extraction capability remains unused
+	// check if some plugin remains unused
 	for (const auto& p : all_plugins)
 	{
-		if(used_plugins.find(p->name()) == used_plugins.end() 
-			&& p->caps() & CAP_EXTRACTION
-			&& !(p->caps() & CAP_SOURCING && p->is_source_compatible(p->event_source())))
+		if (used_plugins.find(p->name()) == used_plugins.end())
 		{
-			return run_result::fatal("Plugin '" + p->name()
-				+ "' has field extraction capability but is not compatible with any known event source");
+			return run_result::fatal("Plugin '" + p->name() + "' is loaded but unused as not compatible with any known event source");
 		}
 	}
 

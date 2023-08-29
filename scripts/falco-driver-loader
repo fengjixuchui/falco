@@ -128,22 +128,68 @@ get_target_id() {
 
 	case "${OS_ID}" in
 	("amzn")
-		if [[ $VERSION_ID == "2" ]]; then
+		case "${VERSION_ID}" in
+		("2")
 			TARGET_ID="amazonlinux2"
-		else
+			;;
+		("2022")
+			TARGET_ID="amazonlinux2022"
+			;;
+		("2023")
+			TARGET_ID="amazonlinux2023"
+			;;
+		(*)
 			TARGET_ID="amazonlinux"
+			;;
+		esac
+		;;
+	("debian")
+		# Workaround: debian kernelreleases might now be actual kernel running;
+		# instead, they might be the Debian kernel package
+		# providing the compatible kernel ABI
+		# See https://lists.debian.org/debian-user/2017/03/msg00485.html
+		# Real kernel release is embedded inside the kernel version.
+		# Moreover, kernel arch, when present, is attached to the former,
+		# therefore make sure to properly take it and attach it to the latter.
+		# Moreover, we support 3 flavors for debian kernels: cloud, rt and normal.
+		# KERNEL-RELEASE will have a `-rt`, or `-cloud` if we are in one of these flavors.
+		# Manage it to download the correct driver.
+		#
+		# Example: KERNEL_RELEASE="5.10.0-0.deb10.22-rt-amd64" and `uname -v`="5.10.178-3"
+		# should lead to: KERNEL_RELEASE="5.10.178-3-rt-amd64"
+		TARGET_ID=$(echo "${OS_ID}" | tr '[:upper:]' '[:lower:]')
+		local ARCH_extra=""
+		if [[ $KERNEL_RELEASE =~ -?(rt-|cloud-|)(amd64|arm64) ]];
+		then
+			ARCH_extra="-${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+		fi
+		if [[ ${DRIVER_KERNEL_VERSION} =~ ([0-9]+\.[0-9]+\.[0-9]+\-[0-9]+) ]];
+		then
+			KERNEL_RELEASE="${BASH_REMATCH[1]}${ARCH_extra}"
 		fi
 		;;
 	("ubuntu")
 		# Extract the flavor from the kernelrelease
 		# Examples:
-		# 5.0.0-1028-aws-5.0 -> ubuntu-aws-5.0
+		# 5.0.0-1028-aws-5.0 -> ubuntu-aws
 		# 5.15.0-1009-aws -> ubuntu-aws
 		if [[ $KERNEL_RELEASE =~ -([a-zA-Z]+)(-.*)?$ ]];
 		then
-			TARGET_ID="ubuntu-${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+			TARGET_ID="ubuntu-${BASH_REMATCH[1]}"
 		else
 			TARGET_ID="ubuntu-generic"
+		fi
+
+
+		# In the case that the kernelversion isn't just a number
+		# we keep also the remaining part excluding `-Ubuntu`.
+		# E.g.:
+		# from the following `uname -v` result
+		# `#26~22.04.1-Ubuntu SMP Mon Apr 24 01:58:15 UTC 2023`
+		# we obtain the kernelversion`26~22.04.1`
+		if [[ ${DRIVER_KERNEL_VERSION} =~ (^\#[0-9]+\~[^-]*-Ubuntu .*$) ]];
+		then
+			KERNEL_VERSION=$(echo "${DRIVER_KERNEL_VERSION}" | sed 's/#\([^-\\ ]*\).*/\1/g')
 		fi
 		;;
 	("flatcar")
@@ -151,7 +197,7 @@ get_target_id() {
 		TARGET_ID=$(echo "${OS_ID}" | tr '[:upper:]' '[:lower:]')
 		;;
 	("minikube")
-		TARGET_ID="${OS_ID}"
+		TARGET_ID=$(echo "${OS_ID}" | tr '[:upper:]' '[:lower:]')
 		# Extract the minikube version. Ex. With minikube version equal to "v1.26.0-1655407986-14197" the extracted version
 		# will be "1.26.0"
 		if [[ $(cat ${HOST_ROOT}/etc/VERSION) =~ ([0-9]+(\.[0-9]+){2}) ]]; then
@@ -163,7 +209,7 @@ get_target_id() {
 		fi
 		;;
 	("bottlerocket")
-		TARGET_ID="${OS_ID}"
+		TARGET_ID=$(echo "${OS_ID}" | tr '[:upper:]' '[:lower:]')
 		# variant_id has been sourced from os-release. Get only the first variant part
 		if [[ -n ${VARIANT_ID} ]];  then
 			# take just first part (eg: VARIANT_ID=aws-k8s-1.15 -> aws)
@@ -171,6 +217,11 @@ get_target_id() {
 		fi
 		# version_id has been sourced from os-release. Build a kernel version like: 1_1.11.0-aws
 		KERNEL_VERSION="1_${VERSION_ID}-${VARIANT_ID_CUT}"
+		;;
+	("talos")
+		TARGET_ID=$(echo "${OS_ID}" | tr '[:upper:]' '[:lower:]')
+		# version_id has been sourced from os-release. Build a kernel version like: 1_1.4.1
+		KERNEL_VERSION="1_${VERSION_ID}"
 		;;
 	(*)
 		TARGET_ID=$(echo "${OS_ID}" | tr '[:upper:]' '[:lower:]')
@@ -207,7 +258,7 @@ flatcar_relocate_tools() {
 
 load_kernel_module_compile() {
 	# Skip dkms on UEK hosts because it will always fail
-	if [[ $(uname -r) == *uek* ]]; then
+	if [[ ${DRIVER_KERNEL_RELEASE} == *uek* ]]; then
 		>&2 echo "Skipping because the dkms install always fail (on UEK hosts)"
 		return
 	fi
@@ -218,7 +269,7 @@ load_kernel_module_compile() {
 	fi
 
 	if [ "${TARGET_ID}" == "flatcar" ]; then
-		KERNEL_RELEASE=$(uname -r)
+		KERNEL_RELEASE=${DRIVER_KERNEL_RELEASE}
 		echo "* Flatcar detected (version ${VERSION_ID}); relocating kernel tools"
 		flatcar_relocate_tools
 	fi
@@ -232,10 +283,10 @@ load_kernel_module_compile() {
 			continue
 		fi
 		echo "* Trying to dkms install ${DRIVER_NAME} module with GCC ${CURRENT_GCC}"
-		echo "#!/usr/bin/env bash" > /tmp/falco-dkms-make
-		echo "make CC=${CURRENT_GCC} \$@" >> /tmp/falco-dkms-make
-		chmod +x /tmp/falco-dkms-make
-		if dkms install --directive="MAKE='/tmp/falco-dkms-make'" -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}" -k "${KERNEL_RELEASE}" 2>/dev/null; then
+		echo "#!/usr/bin/env bash" > "${TMPDIR}/falco-dkms-make"
+		echo "make CC=${CURRENT_GCC} \$@" >> "${TMPDIR}/falco-dkms-make"
+		chmod +x "${TMPDIR}/falco-dkms-make"
+		if dkms install --directive="MAKE='${TMPDIR}/falco-dkms-make'" -m "${DRIVER_NAME}" -v "${DRIVER_VERSION}" -k "${KERNEL_RELEASE}" 2>/dev/null; then
 			echo "* ${DRIVER_NAME} module installed in dkms"
 			KO_FILE="/var/lib/dkms/${DRIVER_NAME}/${DRIVER_VERSION}/${KERNEL_RELEASE}/${ARCH}/module/${DRIVER_NAME}"
 			if [ -f "$KO_FILE.ko" ]; then
@@ -435,6 +486,12 @@ load_bpf_probe_compile() {
 		make modules_prepare > /dev/null
 	}
 
+	if [ "${TARGET_ID}" == "flatcar" ]; then
+		KERNEL_RELEASE=${DRIVER_KERNEL_RELEASE}
+		echo "* Flatcar detected (version ${VERSION_ID}); relocating kernel tools"
+		flatcar_relocate_tools
+	fi
+
 	if [ "${TARGET_ID}" == "cos" ]; then
 		echo "* COS detected (build ${BUILD_ID}), using COS kernel headers"
 
@@ -471,7 +528,7 @@ load_bpf_probe_compile() {
 		MINIKUBE_VERSION="$(cat "${HOST_ROOT}/etc/VERSION")"
 		echo "* Minikube detected (${MINIKUBE_VERSION}), using linux kernel sources for minikube kernel"
 		local kernel_version
-		kernel_version=$(uname -r)
+		kernel_version=${DRIVER_KERNEL_RELEASE}
 		local -r kernel_version_major=$(echo "${kernel_version}" | cut -d. -f1)
 		local -r kernel_version_minor=$(echo "${kernel_version}" | cut -d. -f2)
 		local -r kernel_version_patch=$(echo "${kernel_version}" | cut -d. -f3)
@@ -484,9 +541,9 @@ load_bpf_probe_compile() {
 	fi
 
 	if [ -n "${BPF_USE_LOCAL_KERNEL_SOURCES}" ]; then
-		local -r kernel_version_major=$(uname -r | cut -d. -f1)
-		local -r kernel_version=$(uname -r | cut -d- -f1)
-		KERNEL_EXTRA_VERSION="-$(uname -r | cut -d- -f2)"
+		local -r kernel_version_major=$(echo "${DRIVER_KERNEL_RELEASE}" | cut -d. -f1)
+		local -r kernel_version=$(echo "${DRIVER_KERNEL_RELEASE}" | cut -d- -f1)
+		KERNEL_EXTRA_VERSION="-$(echo "${DRIVER_KERNEL_RELEASE}" | cut -d- -f2)"
 
 		echo "* Using downloaded kernel sources for kernel version ${kernel_version}..."
 
@@ -616,6 +673,8 @@ print_usage() {
 	echo "  DRIVER_NAME              specify a different name for the driver"
 	echo "  DRIVER_INSECURE_DOWNLOAD whether you want to allow insecure downloads or not"
 	echo "  DRIVER_CURL_OPTIONS      specify additional options to be passed to curl command used to download Falco drivers"
+	echo "  DRIVER_KERNEL_RELEASE    specify the kernel release for which to download/build the driver in the same format used by 'uname -r' (e.g. '6.1.0-10-cloud-amd64')"
+	echo "  DRIVER_KERNEL_VERSION    specify the kernel version for which to download/build the driver in the same format used by 'uname -v' (e.g. '#1 SMP PREEMPT_DYNAMIC Debian 6.1.38-2 (2023-07-27)')"
 	echo ""
 	echo "Versions:"
 	echo "  Falco version  ${FALCO_VERSION}"
@@ -625,13 +684,16 @@ print_usage() {
 
 ARCH=$(uname -m)
 
-KERNEL_RELEASE=$(uname -r)
+DRIVER_KERNEL_RELEASE=${DRIVER_KERNEL_RELEASE:-$(uname -r)}
+KERNEL_RELEASE=${DRIVER_KERNEL_RELEASE}
 
 if ! hash sed > /dev/null 2>&1; then
 	>&2 echo "This program requires sed"
 	exit 1
 fi
-KERNEL_VERSION=$(uname -v | sed 's/#\([[:digit:]]\+\).*/\1/')
+
+DRIVER_KERNEL_VERSION=${DRIVER_KERNEL_VERSION:-$(uname -v)}
+KERNEL_VERSION=$(echo "${DRIVER_KERNEL_VERSION}" | sed 's/#\([[:digit:]]\+\).*/\1/')
 
 DRIVERS_REPO=${DRIVERS_REPO:-"@DRIVERS_REPO@"}
 
@@ -658,6 +720,8 @@ DRIVER="module"
 if [ -v FALCO_BPF_PROBE ]; then
 	DRIVER="bpf"
 fi
+
+TMPDIR=${TMPDIR:-"/tmp"}
 
 ENABLE_COMPILE=
 ENABLE_DOWNLOAD=

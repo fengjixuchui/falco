@@ -22,27 +22,32 @@ using namespace falco::app::actions;
 
 void configure_output_format(falco::app::state& s)
 {
+	// See https://falco.org/docs/rules/style-guide/
+	const std::string container_info = "container_id=%container.id container_image=%container.image.repository container_image_tag=%container.image.tag container_name=%container.name";
+	const std::string k8s_info = "k8s_ns=%k8s.ns.name k8s_pod_name=%k8s.pod.name";
+	const std::string gvisor_info = "vpid=%proc.vpid vtid=%thread.vtid";
+
 	std::string output_format;
 	bool replace_container_info = false;
 
 	if(s.options.print_additional == "c" || s.options.print_additional == "container")
 	{
-		output_format = "container=%container.name (id=%container.id)";
+		output_format = container_info;
 		replace_container_info = true;
 	}
 	else if(s.options.print_additional == "cg" || s.options.print_additional == "container-gvisor")
 	{
-		output_format = "container=%container.name (id=%container.id) vpid=%proc.vpid vtid=%thread.vtid";
+		output_format = gvisor_info + " " + container_info;
 		replace_container_info = true;
 	}
 	else if(s.options.print_additional == "k" || s.options.print_additional == "kubernetes")
 	{
-		output_format = "k8s.ns=%k8s.ns.name k8s.pod=%k8s.pod.name container=%container.id";
+		output_format = container_info + " " + k8s_info;
 		replace_container_info = true;
 	}
 	else if(s.options.print_additional == "kg" || s.options.print_additional == "kubernetes-gvisor")
 	{
-		output_format = "k8s.ns=%k8s.ns.name k8s.pod=%k8s.pod.name container=%container.id vpid=%proc.vpid vtid=%thread.vtid";
+		output_format = gvisor_info + " " + container_info + " " + k8s_info;
 		replace_container_info = true;
 	}
 	else if(!s.options.print_additional.empty())
@@ -60,49 +65,37 @@ void configure_output_format(falco::app::state& s)
 void add_source_to_engine(falco::app::state& s, const std::string& src)
 {
 	auto src_info = s.source_infos.at(src);
-	std::shared_ptr<gen_event_filter_factory> filter_factory = nullptr;
-	std::shared_ptr<gen_event_formatter_factory> formatter_factory = nullptr;
+	auto& filterchecks = *src_info->filterchecks.get();
+	auto* inspector = src_info->inspector.get();
 
-	if (src == falco_common::syscall_source)
-	{
-		filter_factory = std::shared_ptr<gen_event_filter_factory>(
-			new sinsp_filter_factory(src_info->inspector.get()));
-		formatter_factory = std::shared_ptr<gen_event_formatter_factory>(
-			new sinsp_evt_formatter_factory(src_info->inspector.get()));
-	}
-	else
-	{
-		auto &filterchecks = s.source_infos.at(src)->filterchecks;
-		filter_factory = std::shared_ptr<gen_event_filter_factory>(
-			new sinsp_filter_factory(src_info->inspector.get(), filterchecks));
-		formatter_factory = std::shared_ptr<gen_event_formatter_factory>(
-			new sinsp_evt_formatter_factory(src_info->inspector.get(), filterchecks));
-	}
+	auto filter_factory = std::shared_ptr<gen_event_filter_factory>(
+		new sinsp_filter_factory(inspector, filterchecks));
+	auto formatter_factory = std::shared_ptr<gen_event_formatter_factory>(
+		new sinsp_evt_formatter_factory(inspector, filterchecks));
 
 	if(s.config->m_json_output)
 	{
 		formatter_factory->set_output_format(gen_event_formatter::OF_JSON);
 	}
 
-	src_info->engine_idx = s.engine->add_source(
-		src, filter_factory, formatter_factory);
+	src_info->engine_idx = s.engine->add_source(src, filter_factory, formatter_factory);
 }
 
 falco::app::run_result falco::app::actions::init_falco_engine(falco::app::state& s)
 {
+	// add syscall as first source, this is also what each inspector do
+	// in their own list of registered event sources
+	add_source_to_engine(s, falco_common::syscall_source);
+
 	// add all non-syscall event sources in engine
 	for (const auto& src : s.loaded_sources)
 	{
+		// we skip the syscall source because we already added it
 		if (src != falco_common::syscall_source)
 		{
-			// we skip the syscall as we want it to be the one added for last
-			// in the engine. This makes the source index assignment easier.
 			add_source_to_engine(s, src);
 		}
 	}
-
-	// add syscall as last source
-	add_source_to_engine(s, falco_common::syscall_source);
 
 	// note: in capture mode, we can assume that the plugin source index will
 	// be the same in both the falco engine and the sinsp plugin manager.
@@ -117,7 +110,7 @@ falco::app::run_result falco::app::actions::init_falco_engine(falco::app::state&
 		auto manager = s.offline_inspector->get_plugin_manager();
 		for (const auto &p : manager->plugins())
 		{
-			if (p->caps() & CAP_SOURCING)
+			if (p->caps() & CAP_SOURCING && p->id() != 0)
 			{
 				bool added = false;
 				auto source_idx = manager->source_idx_by_plugin_id(p->id(), added);

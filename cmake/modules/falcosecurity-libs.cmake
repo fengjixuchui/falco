@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2021 The Falco Authors.
+# Copyright (C) 2023 The Falco Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 # the License. You may obtain a copy of the License at
@@ -25,14 +25,17 @@ if(FALCOSECURITY_LIBS_SOURCE_DIR)
 else()
   # FALCOSECURITY_LIBS_VERSION accepts a git reference (branch name, commit hash, or tag) to the falcosecurity/libs repository.
   # In case you want to test against another falcosecurity/libs version (or branch, or commit) just pass the variable -
-  # ie., `cmake -DFALCOSECURITY_LIBS_VERSION=dev ..`
+  # ie., `cmake -DFALCOSECURITY_LIBS_VERSION=dev ..` 
   if(NOT FALCOSECURITY_LIBS_VERSION)
-    set(FALCOSECURITY_LIBS_VERSION "4b26051e7b7558eb314ef6d240efa252d0a48fd7")
-    set(FALCOSECURITY_LIBS_CHECKSUM "SHA256=5b4dd9e2ae0cd2efeaf9da37d8c29631241d448c9ce5b0e35d8dd7f81d814034")
+    set(FALCOSECURITY_LIBS_VERSION "6caaa3c85d7c783b29cd32832f2552a4bd6cd739")
+    set(FALCOSECURITY_LIBS_CHECKSUM "SHA256=0e32682499355332561962174119520cd02c652a6b73040f17d3099eee7537ea")
   endif()
 
   # cd /path/to/build && cmake /path/to/source
-  execute_process(COMMAND "${CMAKE_COMMAND}" -DFALCOSECURITY_LIBS_VERSION=${FALCOSECURITY_LIBS_VERSION} -DFALCOSECURITY_LIBS_CHECKSUM=${FALCOSECURITY_LIBS_CHECKSUM}
+  execute_process(COMMAND "${CMAKE_COMMAND}"
+      -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+      -DFALCOSECURITY_LIBS_VERSION=${FALCOSECURITY_LIBS_VERSION}
+      -DFALCOSECURITY_LIBS_CHECKSUM=${FALCOSECURITY_LIBS_CHECKSUM}
     ${FALCOSECURITY_LIBS_CMAKE_SOURCE_DIR} WORKING_DIRECTORY ${FALCOSECURITY_LIBS_CMAKE_WORKING_DIR})
 
   # cmake --build .
@@ -42,14 +45,18 @@ endif()
 
 set(LIBS_PACKAGE_NAME "falcosecurity")
 
-add_definitions(-D_GNU_SOURCE)
-add_definitions(-DHAS_CAPTURE)
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+  add_definitions(-D_GNU_SOURCE)
+  add_definitions(-DHAS_CAPTURE)
+endif()
 
 if(MUSL_OPTIMIZED_BUILD)
   add_definitions(-DMUSL_OPTIMIZED)
 endif()
 
 set(SCAP_HOST_ROOT_ENV_VAR_NAME "HOST_ROOT")
+set(SCAP_HOSTNAME_ENV_VAR "FALCO_HOSTNAME")
+set(SINSP_AGENT_CGROUP_MEM_PATH_ENV_VAR "FALCO_CGROUP_MEM_PATH")
 
 if(NOT LIBSCAP_DIR)
   set(LIBSCAP_DIR "${FALCOSECURITY_LIBS_SOURCE_DIR}")

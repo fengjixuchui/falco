@@ -22,7 +22,7 @@ limitations under the License.
 #include "restart_handler.h"
 #include "../configuration.h"
 #include "../stats_writer.h"
-#ifndef MINIMAL_BUILD
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 #include "../grpc_server.h"
 #include "../webserver.h"
 #endif
@@ -47,12 +47,21 @@ struct state
     // Holds the info mapped for each loaded event source
     struct source_info
     {
+        source_info():
+            engine_idx(-1),
+            filterchecks(new filter_check_list()),
+            inspector(nullptr) { }
+        source_info(source_info&&) = default;
+        source_info& operator = (source_info&&) = default;
+        source_info(const source_info&) = default;
+        source_info& operator = (const source_info&) = default;
+    
         // The index of the given event source in the state's falco_engine,
         // as returned by falco_engine::add_source
         std::size_t engine_idx;
         // The filtercheck list containing all fields compatible
         // with the given event source
-        filter_check_list filterchecks;
+        std::shared_ptr<filter_check_list> filterchecks;
         // The inspector assigned to this event source. If in capture mode,
         // all event source will share the same inspector. If the event
         // source is a plugin one, the assigned inspector must have that
@@ -98,8 +107,10 @@ struct state
     std::shared_ptr<falco_engine> engine;
 
     // The set of loaded event sources (by default, the syscall event
-    // source plus all event sources coming from the loaded plugins)
-    std::unordered_set<std::string> loaded_sources;
+    // source plus all event sources coming from the loaded plugins).
+    // note: this has to be a vector to preserve the loading order,
+    // however it's not supposed to contain duplicate values.
+    std::vector<std::string> loaded_sources;
 
     // The set of enabled event sources (can be altered by using
     // the --enable-source and --disable-source options)
@@ -126,7 +137,7 @@ struct state
     // Helper responsible for watching of handling hot application restarts
     std::shared_ptr<restart_handler> restarter;
 
-#ifndef MINIMAL_BUILD
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
     falco::grpc::server grpc_server;
     std::thread grpc_server_thread;
 
@@ -141,6 +152,11 @@ struct state
     inline bool is_gvisor_enabled() const
     {
         return !options.gvisor_config.empty();
+    }
+    
+    inline bool is_source_enabled(const std::string& src) const 
+    {
+        return enabled_sources.find(falco_common::syscall_source) != enabled_sources.end();
     }
 };
 

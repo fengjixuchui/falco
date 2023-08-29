@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019 The Falco Authors.
+# Copyright (C) 2023 The Falco Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 # the License. You may obtain a copy of the License at
@@ -19,6 +19,14 @@ option(BUILD_WARNINGS_AS_ERRORS "Enable building with -Wextra -Werror flags" OFF
 option(MINIMAL_BUILD "Build a minimal version of Falco, containing only the engine and basic input/output (EXPERIMENTAL)" OFF)
 option(MUSL_OPTIMIZED_BUILD "Enable if you want a musl optimized build" OFF)
 option(BUILD_FALCO_UNIT_TESTS "Build falco unit tests" OFF)
+
+if(EMSCRIPTEN)
+  set(USE_BUNDLED_DEPS ON CACHE BOOL "" FORCE)
+  set(BUILD_DRIVER OFF CACHE BOOL "" FORCE)
+  set(ENABLE_DKMS OFF CACHE BOOL "" FORCE)
+  set(BUILD_BPF OFF CACHE BOOL "" FORCE)
+  set(CPACK_GENERATOR TGZ CACHE BOOL "" FORCE)
+endif()
 
 # gVisor is currently only supported on Linux x86_64
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
@@ -44,6 +52,8 @@ if (${EP_UPDATE_DISCONNECTED})
     PROPERTY EP_UPDATE_DISCONNECTED TRUE)
 endif()
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Elapsed time
 # set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND} -E time") # TODO(fntlnz, leodido): add a flag to enable this
@@ -66,7 +76,11 @@ if(NOT DEFINED FALCO_ETC_DIR)
 endif()
 
 # This will be used to print the architecture for which Falco is compiled.
-set(FALCO_TARGET_ARCH ${CMAKE_SYSTEM_PROCESSOR})
+if (EMSCRIPTEN)
+  set(FALCO_TARGET_ARCH "wasm")
+else()
+  set(FALCO_TARGET_ARCH ${CMAKE_SYSTEM_PROCESSOR})
+endif()
 
 if(NOT FALCO_EXTRA_DEBUG_FLAGS)
   set(FALCO_EXTRA_DEBUG_FLAGS "-D_DEBUG")
@@ -93,7 +107,10 @@ endif()
 
 # explicitly set hardening flags
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(FALCO_SECURITY_FLAGS "-Wl,-z,relro,-z,now -fstack-protector-strong")
+set(FALCO_SECURITY_FLAGS "")
+if(NOT EMSCRIPTEN)
+  set(FALCO_SECURITY_FLAGS "${FALCO_SECURITY_FLAGS} -Wl,-z,relro,-z,now -fstack-protector-strong")
+endif()
 if(CMAKE_BUILD_TYPE STREQUAL "release")
   set(FALCO_SECURITY_FLAGS "${FALCO_SECURITY_FLAGS} -D_FORTIFY_SOURCE=2")
 endif()
@@ -108,15 +125,13 @@ if(BUILD_WARNINGS_AS_ERRORS)
 endif()
 
 set(CMAKE_C_FLAGS "${CMAKE_COMMON_FLAGS}")
-set(CMAKE_CXX_FLAGS "--std=c++0x ${CMAKE_COMMON_FLAGS} -Wno-class-memaccess")
+set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_COMMON_FLAGS} -Wno-class-memaccess")
 
 set(CMAKE_C_FLAGS_DEBUG "${FALCO_EXTRA_DEBUG_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "${FALCO_EXTRA_DEBUG_FLAGS}")
 
 set(CMAKE_C_FLAGS_RELEASE "-O3 -fno-strict-aliasing -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -fno-strict-aliasing -DNDEBUG")
-
-include(GetFalcoVersion)
 
 set(PACKAGE_NAME "falco")
 set(DRIVER_NAME "falco")
@@ -145,6 +160,9 @@ include(ExternalProject)
 # libs
 include(falcosecurity-libs)
 
+# compute FALCO_VERSION (depends on libs)
+include(falco-version)
+
 # jq
 include(jq)
 
@@ -157,13 +175,14 @@ include(b64)
 # yaml-cpp
 include(yaml-cpp)
 
-if(NOT MINIMAL_BUILD)
+if(NOT WIN32 AND NOT APPLE AND NOT MINIMAL_BUILD AND NOT EMSCRIPTEN)
   # OpenSSL
   include(openssl)
 
   # libcurl
   include(curl)
 
+  # todo(jasondellaluce,rohith-raju): support webserver for non-linux builds too
   # cpp-httlib
   include(cpp-httplib)
 endif()
@@ -171,14 +190,18 @@ endif()
 include(cxxopts)
 
 # One TBB
-include(tbb)
+if (NOT EMSCRIPTEN)
+  include(tbb)
+endif()
 
-if(NOT MINIMAL_BUILD)
+if (NOT MINIMAL_BUILD)
   include(zlib)
-  include(cares)
-  include(protobuf)
-  # gRPC
-  include(grpc)
+  if (NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN)
+    include(cares)
+    include(protobuf)
+    # gRPC
+    include(grpc)
+  endif()
 endif()
 
 # Installation
@@ -187,16 +210,10 @@ install(FILES falco.yaml DESTINATION "${FALCO_ETC_DIR}" COMPONENT "${FALCO_COMPO
 if(NOT MINIMAL_BUILD)
   # Coverage
   include(Coverage)
-
-  # Tests
-  add_subdirectory(test)
 endif()
 
 # Rules
 include(rules)
-
-# Dockerfiles
-add_subdirectory(docker)
 
 # Clang format
 # add_custom_target(format COMMAND clang-format --style=file -i $<TARGET_PROPERTY:falco,SOURCES> COMMENT "Formatting ..." VERBATIM)
@@ -215,11 +232,10 @@ add_subdirectory(scripts)
 add_subdirectory(userspace/engine)
 add_subdirectory(userspace/falco)
 
-if(NOT MUSL_OPTIMIZED_BUILD)
+if(NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN AND NOT MUSL_OPTIMIZED_BUILD)
   include(plugins)
+  include(falcoctl)
 endif()
-
-include(falcoctl)
 
 # Packages configuration
 include(CPackConfig)

@@ -37,6 +37,7 @@ limitations under the License.
 #include "falco_common.h"
 #include "falco_source.h"
 #include "falco_load_result.h"
+#include "filter_details_resolver.h"
 
 //
 // This class acts as the primary interface between a program and the
@@ -123,7 +124,7 @@ public:
 	// Print details on the given rule. If rule is NULL, print
 	// details on all rules.
 	//
-	void describe_rule(std::string *rule) const;
+	void describe_rule(std::string *rule, bool json) const;
 
 	//
 	// Print statistics on how many events matched each rule.
@@ -188,14 +189,16 @@ public:
 	// event source is not thread-safe of its own, so invoking this method
 	// concurrently with the same source_idx would inherently cause data races
 	// and lead to undefined behavior.
-	std::unique_ptr<rule_result> process_event(std::size_t source_idx, gen_event *ev, uint16_t ruleset_id);
+	std::unique_ptr<std::vector<rule_result>> process_event(std::size_t source_idx,
+		gen_event *ev, uint16_t ruleset_id, falco_common::rule_matching strategy);
 
 	//
 	// Wrapper assuming the default ruleset.
 	//
 	// This inherits the same thread-safety guarantees.
 	//
-	std::unique_ptr<rule_result> process_event(std::size_t source_idx, gen_event *ev);
+	std::unique_ptr<std::vector<rule_result>> process_event(std::size_t source_idx,
+		gen_event *ev, falco_common::rule_matching strategy);
 
 	//
 	// Configure the engine to support events with the provided
@@ -297,6 +300,20 @@ private:
 	// ratio/multiplier.
 	//
 	inline bool should_drop_evt() const;
+
+	// Retrieve json details from rules, macros, lists
+	void get_json_details(const falco_rule& r,
+					const rule_loader::rule_info& ri,
+					sinsp* insp,
+					Json::Value& rule) const;
+	void get_json_details(const rule_loader::macro_info& m,
+					Json::Value& macro) const;
+	void get_json_details(const rule_loader::list_info& l,
+					Json::Value& list) const;
+	void get_json_details(libsinsp::filter::ast::expr* ast,
+					Json::Value& output) const;
+	void get_json_evt_types(libsinsp::filter::ast::expr* ast,
+					Json::Value& output) const;
 
 	rule_loader::collector m_rule_collector;
 	indexed_vector<falco_rule> m_rules;

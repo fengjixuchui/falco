@@ -38,6 +38,7 @@ falco_configuration::falco_configuration():
 	m_notifications_rate(0),
 	m_notifications_max_burst(1000),
 	m_watch_config_files(true),
+	m_rule_matching(falco_common::rule_matching::FIRST),
 	m_buffered_outputs(false),
 	m_time_format_iso_8601(false),
 	m_output_timeout(2000),
@@ -58,8 +59,20 @@ falco_configuration::falco_configuration():
 	m_metadata_download_watch_freq_sec(1),
 	m_syscall_buf_size_preset(4),
 	m_cpus_for_each_syscall_buffer(2),
-	m_syscall_drop_failed_exit(false)
+	m_syscall_drop_failed_exit(false),
+	m_base_syscalls_repair(false),
+	m_metrics_enabled(false),
+	m_metrics_interval_str("5000"),
+	m_metrics_interval(5000),
+	m_metrics_stats_rule_enabled(false),
+	m_metrics_output_file(""),
+	m_metrics_resource_utilization_enabled(true),
+	m_metrics_kernel_event_counters_enabled(true),
+	m_metrics_libbpf_stats_enabled(true),
+	m_metrics_convert_memory_to_mb(true),
+	m_metrics_include_empty_values(false)
 {
+	init({});
 }
 
 void falco_configuration::init(const std::vector<std::string>& cmdline_options)
@@ -232,6 +245,12 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 	m_notifications_rate = config.get_scalar<uint32_t>("outputs.rate", 0);
 	m_notifications_max_burst = config.get_scalar<uint32_t>("outputs.max_burst", 1000);
 
+	std::string rule_matching = config.get_scalar<std::string>("rule_matching", "first");
+	if (!falco_common::parse_rule_matching(rule_matching, m_rule_matching))
+	{
+		throw std::logic_error("Unknown rule matching strategy \"" + rule_matching + "\"--must be one of first, all");
+	}
+
 	std::string priority = config.get_scalar<std::string>("priority", "debug");
 	if (!falco_common::parse_priority(priority, m_min_priority))
 	{
@@ -336,11 +355,22 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 	config.get_sequence<std::unordered_set<std::string>>(m_base_syscalls_custom_set, std::string("base_syscalls.custom_set"));
 	m_base_syscalls_repair = config.get_scalar<bool>("base_syscalls.repair", false);
 
-	std::set<std::string> load_plugins;
+	m_metrics_enabled = config.get_scalar<bool>("metrics.enabled", false);
+	m_metrics_interval_str = config.get_scalar<std::string>("metrics.interval", "5000");
+	m_metrics_interval = falco::utils::parse_prometheus_interval(m_metrics_interval_str);
+	m_metrics_stats_rule_enabled = config.get_scalar<bool>("metrics.output_rule", false);
+	m_metrics_output_file = config.get_scalar<std::string>("metrics.output_file", "");
+	m_metrics_resource_utilization_enabled = config.get_scalar<bool>("metrics.resource_utilization_enabled", true);
+	m_metrics_kernel_event_counters_enabled = config.get_scalar<bool>("metrics.kernel_event_counters_enabled", true);
+	m_metrics_libbpf_stats_enabled = config.get_scalar<bool>("metrics.libbpf_stats_enabled", true);
+	m_metrics_convert_memory_to_mb = config.get_scalar<bool>("metrics.convert_memory_to_mb", true);
+	m_metrics_include_empty_values = config.get_scalar<bool>("metrics.include_empty_values", false);
+
+	std::vector<std::string> load_plugins;
 
 	bool load_plugins_node_defined = config.is_defined("load_plugins");
 
-	config.get_sequence<std::set<std::string>>(load_plugins, "load_plugins");
+	config.get_sequence<std::vector<std::string>>(load_plugins, "load_plugins");
 
 	std::list<falco_configuration::plugin_config> plugins;
 	try
@@ -358,14 +388,32 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 
 	// If load_plugins was specified, only save plugins matching those in values
 	m_plugins.clear();
-	for (auto &p : plugins)
+	if (!load_plugins_node_defined)
 	{
-		// If load_plugins was not specified at all, every
-		// plugin is added. Otherwise, the plugin must be in
-		// the load_plugins list.
-		if(!load_plugins_node_defined || load_plugins.find(p.m_name) != load_plugins.end())
+		// If load_plugins was not specified at all, every plugin is added.
+		// The loading order is the same as the sequence in the YAML config.
+		m_plugins = { plugins.begin(), plugins.end() };
+	}
+	else
+	{
+		// If load_plugins is specified, only plugins contained in its list
+		// are added, with the same order as in the list.
+		for (const auto& pname : load_plugins)
 		{
-			m_plugins.push_back(p);
+			bool found = false;
+			for (const auto& p : plugins)
+			{
+				if (pname == p.m_name)
+				{
+					m_plugins.push_back(p);
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				throw std::logic_error("Cannot load plugin '" + pname + "': plugin config not found for given name");
+			}
 		}
 	}
 

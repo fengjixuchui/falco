@@ -58,6 +58,7 @@ public:
 	std::list<std::string> m_loaded_rules_filenames;
 	// List of loaded rule folders
 	std::list<std::string> m_loaded_rules_folders;
+
 	bool m_json_output;
 	bool m_json_include_output_property;
 	bool m_json_include_tags_property;
@@ -67,6 +68,7 @@ public:
 	uint32_t m_notifications_max_burst;
 
 	falco_common::priority_type m_min_priority;
+	falco_common::rule_matching m_rule_matching;
 
 	bool m_watch_config_files;
 	bool m_buffered_outputs;
@@ -111,6 +113,18 @@ public:
 	// User supplied base_syscalls, overrides any Falco state engine enforcement.
 	std::unordered_set<std::string> m_base_syscalls_custom_set;
 	bool m_base_syscalls_repair;
+
+	// metrics configs
+	bool m_metrics_enabled;
+	std::string m_metrics_interval_str;
+	uint64_t m_metrics_interval;
+	bool m_metrics_stats_rule_enabled;
+	std::string m_metrics_output_file;
+	bool m_metrics_resource_utilization_enabled;
+	bool m_metrics_kernel_event_counters_enabled;
+	bool m_metrics_libbpf_stats_enabled;
+	bool m_metrics_convert_memory_to_mb;
+	bool m_metrics_include_empty_values;
 
 	std::vector<plugin_config> m_plugins;
 

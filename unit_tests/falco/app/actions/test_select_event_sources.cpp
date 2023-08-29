@@ -14,12 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <gtest/gtest.h>
-#include <falco/app/state.h>
-#include <falco/app/actions/actions.h>
-
-#define EXPECT_ACTION_OK(r)     { EXPECT_TRUE(r.success); EXPECT_TRUE(r.proceed); EXPECT_EQ(r.errstr, ""); }
-#define EXPECT_ACTION_FAIL(r)   { EXPECT_FALSE(r.success); EXPECT_FALSE(r.proceed); EXPECT_NE(r.errstr, ""); }
+#include "app_action_helpers.h"
 
 TEST(ActionSelectEventSources, pre_post_conditions)
 {
@@ -44,10 +39,18 @@ TEST(ActionSelectEventSources, pre_post_conditions)
         falco::app::state s;
         s.loaded_sources = {"syscall", "some_source"};
         EXPECT_ACTION_OK(action(s));
-        EXPECT_EQ(s.loaded_sources, s.enabled_sources);
-        s.loaded_sources.insert("another_source");
+        EXPECT_EQ(s.loaded_sources.size(), s.enabled_sources.size());
+        for (const auto& v : s.loaded_sources)
+        {
+            ASSERT_TRUE(s.enabled_sources.find(v) != s.enabled_sources.end());
+        }
+        s.loaded_sources.push_back("another_source");
         EXPECT_ACTION_OK(action(s));
-        EXPECT_EQ(s.loaded_sources, s.enabled_sources);
+        EXPECT_EQ(s.loaded_sources.size(), s.enabled_sources.size());
+        for (const auto& v : s.loaded_sources)
+        {
+            ASSERT_TRUE(s.enabled_sources.find(v) != s.enabled_sources.end());
+        }
     }
 
     // enable only selected sources

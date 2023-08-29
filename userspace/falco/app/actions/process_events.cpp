@@ -30,13 +30,10 @@ limitations under the License.
 #include "helpers.h"
 #include "../options.h"
 #include "../signals.h"
-#include "../../semaphore.h"
+#include "../../falco_semaphore.h"
 #include "../../stats_writer.h"
 #include "../../falco_outputs.h"
 #include "../../event_drops.h"
-#ifndef MINIMAL_BUILD
-#include "../../webserver.h"
-#endif
 
 #include <plugin_manager.h>
 
@@ -140,15 +137,21 @@ static falco::app::run_result do_inspect(
 	uint64_t duration_start = 0;
 	uint32_t timeouts_since_last_success_or_msg = 0;
 	token_bucket rate_limiter;
-	bool rate_limiter_enabled = s.config->m_notifications_rate > 0;
-	bool source_engine_idx_found = false;
-	bool is_capture_mode = source.empty();
-	bool syscall_source_engine_idx = s.source_infos.at(falco_common::syscall_source)->engine_idx;
-	std::size_t source_engine_idx = 0;
-	std::vector<std::string> source_names = inspector->get_plugin_manager()->sources();
-	source_names.push_back(falco_common::syscall_source);
+	const bool rate_limiter_enabled = s.config->m_notifications_rate > 0;
+	const bool is_capture_mode = source.empty();
+	size_t source_engine_idx = 0;
+
+	// note(jasondellaluce): The "syscall" event source will always be loaded
+	// by default in an inspector, and at index 0. As such, in live mode we would
+	// expect the event source index to always be 0 in case of "syscall" source,
+	// and 1 in case of any other plugin event source, because it would be
+	// the only other source loaded in its relative live inspector.
+	size_t expected_live_evt_src_idx = source == falco_common::syscall_source ? 0 : 1;
+
 	if (!is_capture_mode)
 	{
+		// note: in live mode, each inspector gets assigned a distinct event
+		// source that does not change for the whole capture.
 		source_engine_idx = s.source_infos.at(source)->engine_idx;
 	}
 
@@ -229,11 +232,10 @@ static falco::app::run_result do_inspect(
 					{
 						sinsp_utils::ts_to_string(duration_start, &last_event_time_str, false, true);
 					}
-					std::map<std::string, std::string> o = {
-						{"last_event_time", last_event_time_str},
-					};
+					nlohmann::json fields;
+					fields["last_event_time"] = last_event_time_str;
 					auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-					s.outputs->handle_msg(now, falco_common::PRIORITY_DEBUG, msg, rule, o);
+					s.outputs->handle_msg(now, falco_common::PRIORITY_DEBUG, msg, rule, fields);
 					// Reset the timeouts counter, Falco alerted
 					timeouts_since_last_success_or_msg = 0;
 				}
@@ -260,26 +262,45 @@ static falco::app::run_result do_inspect(
 		// if we are in live mode, we already have the right source engine idx
 		if (is_capture_mode)
 		{
-			source_engine_idx = syscall_source_engine_idx;
-			if (ev->get_type() == PPME_PLUGINEVENT_E)
+			// note: here we can assume that the source index will be the same
+			// in both the falco engine and the inspector. See the
+			// comment in init_falco_engine.cpp for more details.
+			source_engine_idx = ev->get_source_idx();
+			if (source_engine_idx == sinsp_no_event_source_idx)
 			{
-				// note: here we can assume that the source index will be the same
-				// in both the falco engine and the sinsp plugin manager. See the
-				// comment in init_falco_engine.cpp for more details.
-				source_engine_idx = inspector->get_plugin_manager()->source_idx_by_plugin_id(*(int32_t *)ev->get_param(0)->m_val, source_engine_idx_found);
-				if (!source_engine_idx_found)
+				std::string msg = "Unknown event source for inspector's event";
+				if (ev->get_type() == PPME_PLUGINEVENT_E || ev->get_type() == PPME_ASYNCEVENT_E)
 				{
-					return run_result::fatal("Unknown plugin ID in inspector: " + std::to_string(*(int32_t *)ev->get_param(0)->m_val));
+					auto pluginID = *(uint32_t *)ev->get_param(0)->m_val;
+					if (pluginID != 0)
+					{
+						msg += " (plugin ID: " + std::to_string(pluginID) + ")";
+					}
 				}
+				return run_result::fatal(msg);
 			}
-
+	
 			// for capture mode, the source name can change at every event
-			stats_collector.collect(inspector, source_names[source_engine_idx]);
+			stats_collector.collect(inspector, inspector->event_sources()[source_engine_idx], num_evts);
 		}
 		else
 		{
+			// in live mode, each inspector gets assigned a distinct event source,
+			// so we report an error if we fetch an event of a different source.
+			if (expected_live_evt_src_idx != ev->get_source_idx())
+			{
+				std::string actual = (ev->get_source_name() != NULL)
+					? ("'" + std::string(ev->get_source_name()) + "'")
+					: ("<NA>");
+				std::string msg = "Unexpected event source for inspector's event:";
+				msg += " type=" + std::to_string(ev->get_type());
+				msg += ", expected='" + source + " (idx=" + std::to_string(expected_live_evt_src_idx) + ")";
+				msg += "', actual=" + actual + " (idx=" + std::to_string(ev->get_source_idx()) + ")";
+				return run_result::fatal(msg);
+			}
+
 			// for live mode, the source name is constant
-			stats_collector.collect(inspector, source);
+			stats_collector.collect(inspector, source, num_evts);
 		}
 
 		// Reset the timeouts counter, Falco successfully got an event to process
@@ -306,19 +327,22 @@ static falco::app::run_result do_inspect(
 		// engine, which will match the event against the set
 		// of rules. If a match is found, pass the event to
 		// the outputs.
-		std::unique_ptr<falco_engine::rule_result> res = s.engine->process_event(source_engine_idx, ev);
-		if(res)
+		auto res = s.engine->process_event(source_engine_idx, ev, s.config->m_rule_matching);
+		if(res != nullptr)
 		{
-			if (!rate_limiter_enabled || rate_limiter.claim())
+			for(auto& rule_res : *res.get())
 			{
-				s.outputs->handle_event(res->evt, res->rule, res->source, res->priority_num, res->format, res->tags);
-			}
-			else
-			{
-				falco_logger::log(LOG_DEBUG, "Skipping rate-limited notification for rule " + res->rule + "\n");
+				if (!rate_limiter_enabled || rate_limiter.claim())
+				{
+					s.outputs->handle_event(rule_res.evt, rule_res.rule, rule_res.source, rule_res.priority_num, rule_res.format, rule_res.tags);
+				}
+				else
+				{
+					falco_logger::log(LOG_DEBUG, "Skipping rate-limited notification for rule " + rule_res.rule + "\n");
+				}
 			}
 		}
-
+		
 		num_evts++;
 	}
 
@@ -385,39 +409,66 @@ static void process_inspector_events(
 	}
 }
 
-static std::shared_ptr<stats_writer> init_stats_writer(const options& opts)
+static falco::app::run_result init_stats_writer(
+		const std::shared_ptr<const stats_writer>& sw,
+		const std::shared_ptr<const falco_configuration>& config,
+		bool is_dry_run)
 {
-	auto statsw = std::make_shared<stats_writer>();
-	if (!opts.stats_filename.empty())
+	if (!config->m_metrics_enabled)
 	{
-		std::string err;
-		if (!stats_writer::init_ticker(opts.stats_interval, err))
-		{
-			throw falco_exception(err);
-		}
-		statsw.reset(new stats_writer(opts.stats_filename));
+		return  falco::app::run_result::ok();
 	}
-	return statsw;
+
+	/* Enforce minimum bound of 100ms. */
+	if(config->m_metrics_interval < 100)
+	{
+		return falco::app::run_result::fatal("Metrics interval must have a minimum value of 100ms and reflect a Prometheus compliant time duration format: https://prometheus.io/docs/prometheus/latest/querying/basics/#time-durations. ");
+	}
+
+	if(std::all_of(config->m_metrics_interval_str.begin(), config->m_metrics_interval_str.end(), ::isdigit))
+	{
+		falco_logger::log(LOG_WARNING, "Metrics interval was passed as numeric value without Prometheus time unit, this option will be deprecated in the future");
+	}
+
+	if (config->m_metrics_enabled && !sw->has_output())
+	{
+		falco_logger::log(LOG_WARNING, "Metrics are enabled with no output configured, no snapshot will be collected");
+	}
+
+	falco_logger::log(LOG_INFO, "Setting metrics interval to " + config->m_metrics_interval_str + ", equivalent to " + std::to_string(config->m_metrics_interval) + " (ms)\n");
+
+	auto res = falco::app::run_result::ok();
+	if (is_dry_run)
+	{
+		return res;
+	}
+	res.success = stats_writer::init_ticker(config->m_metrics_interval, res.errstr);
+	res.proceed = res.success;
+	return res;
 }
 
 falco::app::run_result falco::app::actions::process_events(falco::app::state& s)
 {
-	run_result res = run_result::ok();
-	bool termination_forced = false;
-
 	// Notify engine that we finished loading and enabling all rules
 	s.engine->complete_rule_loading();
 
 	// Initialize stats writer
-	auto statsw = init_stats_writer(s.options);
+	auto statsw = std::make_shared<stats_writer>(s.outputs, s.config);
+	auto res = init_stats_writer(statsw, s.config, s.options.dry_run);
 
 	if (s.options.dry_run)
 	{
 		falco_logger::log(LOG_DEBUG, "Skipping event processing in dry-run\n");
-		return run_result::ok();
+		return res;
+	}
+
+	if (!res.success)
+	{
+		return res;
 	}
 
 	// Start processing events
+	bool termination_forced = false;
 	if(s.is_capture_mode())
 	{
 		res = open_offline_inspector(s);
@@ -440,6 +491,13 @@ falco::app::run_result falco::app::actions::process_events(falco::app::state& s)
 	else
 	{
 		print_enabled_event_sources(s);
+
+#ifdef __EMSCRIPTEN__
+		if(s.enabled_sources.size() > 1)
+		{
+			return run_result::fatal("enabling multiple event sources is not supported by this Falco build");
+		}
+#endif
 
 		// start event processing for all enabled sources
 		falco::semaphore termination_sem(s.enabled_sources.size());
@@ -499,14 +557,6 @@ falco::app::run_result falco::app::actions::process_events(falco::app::state& s)
 		size_t closed_count = 0;
 		while (closed_count < ctxs.size())
 		{
-			// This is shared across all running event source threads an
-			// keeps the main thread sleepy until one of the parallel
-			// threads terminates and invokes release(). At that point,
-			// we know that at least one thread finished running and we can
-			// attempt joining it. Not that this also works when only one
-			// event source is enabled, in which we have no additional threads.
-			termination_sem.acquire();
-
 			if (!res.success && !termination_forced)
 			{
 				falco_logger::log(LOG_INFO, "An error occurred in an event source, forcing termination...\n");
@@ -514,6 +564,14 @@ falco::app::run_result falco::app::actions::process_events(falco::app::state& s)
 				falco::app::g_terminate_signal.handle([&](){});
 				termination_forced = true;
 			}
+
+			// This is shared across all running event source threads an
+			// keeps the main thread sleepy until one of the parallel
+			// threads terminates and invokes release(). At that point,
+			// we know that at least one thread finished running and we can
+			// attempt joining it. Not that this also works when only one
+			// event source is enabled, in which we have no additional threads.
+			termination_sem.acquire();
 
 			for (auto &ctx : ctxs)
 			{

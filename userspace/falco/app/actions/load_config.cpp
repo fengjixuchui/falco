@@ -15,9 +15,18 @@ limitations under the License.
 */
 
 #include "actions.h"
+#include "falco_utils.h"
 
 using namespace falco::app;
 using namespace falco::app::actions;
+
+// applies legacy/in-deprecation options to the current config
+static void apply_deprecated_options(
+		const falco::app::options& opts,
+		const std::shared_ptr<falco_configuration>& cfg)
+{
+	// Keep for future use cases.
+}
 
 falco::app::run_result falco::app::actions::load_config(falco::app::state& s)
 {
@@ -51,18 +60,22 @@ falco::app::run_result falco::app::actions::load_config(falco::app::state& s)
 
 	s.config->m_buffered_outputs = !s.options.unbuffered_outputs;
 
+	apply_deprecated_options(s.options, s.config);
+
 	return run_result::ok();
 }
 
 falco::app::run_result falco::app::actions::require_config_file(falco::app::state& s)
 {
+#ifndef __EMSCRIPTEN__
 	if (s.options.conf_filename.empty())
 	{
 #ifndef BUILD_TYPE_RELEASE
 		return run_result::fatal(std::string("You must create a config file at ")  + FALCO_SOURCE_CONF_FILE + ", " + FALCO_INSTALL_CONF_FILE + " or by passing -c");
-#else
+#else // BUILD_TYPE_RELEASE
 		return run_result::fatal(std::string("You must create a config file at ")  + FALCO_INSTALL_CONF_FILE + " or by passing -c");
-#endif
+#endif // BUILD_TYPE_RELEASE
 	}
+#endif // __EMSCRIPTEN__
 	return run_result::ok();
 }

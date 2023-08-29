@@ -13,22 +13,26 @@
 
 include(ExternalProject)
 
+# 'stable' or 'dev'
+set(PLUGINS_DOWNLOAD_BUCKET "stable")
+
 string(TOLOWER ${CMAKE_HOST_SYSTEM_NAME} PLUGINS_SYSTEM_NAME)
 
 if(NOT DEFINED PLUGINS_COMPONENT_NAME)
     set(PLUGINS_COMPONENT_NAME "${CMAKE_PROJECT_NAME}-plugins")
 endif()
 
-set(PLUGIN_K8S_AUDIT_VERSION "0.5.0")
+# k8saudit
+set(PLUGIN_K8S_AUDIT_VERSION "0.6.0")
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-    set(PLUGIN_K8S_AUDIT_HASH "c4abb288df018940be8e548340a74d39623b69142304e01523ea189bc698bc80")
+    set(PLUGIN_K8S_AUDIT_HASH "560e8f8dc8fd169e524d95462d65b5227415a7a157442e82383c7d9f456ce58f")
 else() # aarch64
-    set(PLUGIN_K8S_AUDIT_HASH "3bcc849d9f95a3fa519b4592d0947149e492b530fb935a3f98f098e234b7baa7")
+    set(PLUGIN_K8S_AUDIT_HASH "e4757af1bac42b21c5937340790841dedc3805759050a6ffb22d1761e1dd1d31")
 endif()
 
 ExternalProject_Add(
   k8saudit-plugin
-  URL "https://download.falco.org/plugins/stable/k8saudit-${PLUGIN_K8S_AUDIT_VERSION}-${PLUGINS_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz"
+  URL "https://download.falco.org/plugins/${PLUGINS_DOWNLOAD_BUCKET}/k8saudit-${PLUGIN_K8S_AUDIT_VERSION}-${PLUGINS_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz"
   URL_HASH "SHA256=${PLUGIN_K8S_AUDIT_HASH}"
   CONFIGURE_COMMAND ""
   BUILD_COMMAND ""
@@ -38,24 +42,25 @@ install(FILES "${PROJECT_BINARY_DIR}/k8saudit-plugin-prefix/src/k8saudit-plugin/
 
 ExternalProject_Add(
   k8saudit-rules
-  URL "https://download.falco.org/plugins/stable/k8saudit-rules-${PLUGIN_K8S_AUDIT_VERSION}.tar.gz"
-  URL_HASH "SHA256=4383c69ba0ad63a127667c05618c37effc5297e6a7e68a1492acb0e48386540e"
+  URL "https://download.falco.org/plugins/${PLUGINS_DOWNLOAD_BUCKET}/k8saudit-rules-${PLUGIN_K8S_AUDIT_VERSION}.tar.gz"
+  URL_HASH "SHA256=44cee2fb88312d889213e1dbe1b9902d0a3f5c594cce73b2cac8e54fb51321b7"
   CONFIGURE_COMMAND ""
   BUILD_COMMAND ""
   INSTALL_COMMAND "")
 
 install(FILES "${PROJECT_BINARY_DIR}/k8saudit-rules-prefix/src/k8saudit-rules/k8s_audit_rules.yaml" DESTINATION "${FALCO_ETC_DIR}" COMPONENT "${PLUGINS_COMPONENT_NAME}")
 
-set(PLUGIN_CLOUDTRAIL_VERSION "0.7.0")
+# cloudtrail
+set(PLUGIN_CLOUDTRAIL_VERSION "0.8.0")
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-    set(PLUGIN_CLOUDTRAIL_HASH "85d94d8f5915804d5a30ff2f056e51de27d537f1fd1115050b4f4be6d32588cf")
+    set(PLUGIN_CLOUDTRAIL_HASH "13ba77602c0859936f6e3b00f93bd218c463300c6a797b694a0d5aeecde13976")
 else() # aarch64
-    set(PLUGIN_CLOUDTRAIL_HASH "61ae471ee41e76680da9ab66f583d1ec43a2e48fbad8c157caecef56e4aa5fb7")
+    set(PLUGIN_CLOUDTRAIL_HASH "a01730738e9d5769f69957a204c8afe528b059e9a22f59792dfc65e19d6a43db")
 endif()
 
 ExternalProject_Add(
   cloudtrail-plugin
-  URL "https://download.falco.org/plugins/stable/cloudtrail-${PLUGIN_CLOUDTRAIL_VERSION}-${PLUGINS_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz"
+  URL "https://download.falco.org/plugins/${PLUGINS_DOWNLOAD_BUCKET}/cloudtrail-${PLUGIN_CLOUDTRAIL_VERSION}-${PLUGINS_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz"
   URL_HASH "SHA256=${PLUGIN_CLOUDTRAIL_HASH}"
   CONFIGURE_COMMAND ""
   BUILD_COMMAND ""
@@ -65,24 +70,25 @@ install(FILES "${PROJECT_BINARY_DIR}/cloudtrail-plugin-prefix/src/cloudtrail-plu
 
 ExternalProject_Add(
   cloudtrail-rules
-  URL "https://download.falco.org/plugins/stable/cloudtrail-rules-${PLUGIN_CLOUDTRAIL_VERSION}.tar.gz"
-  URL_HASH "SHA256=c805be29ddc14fbffa29f7d6ee4f7e968a3bdb42da5f5483e5e6de273e8850c8"
+  URL "https://download.falco.org/plugins/${PLUGINS_DOWNLOAD_BUCKET}/cloudtrail-rules-${PLUGIN_CLOUDTRAIL_VERSION}.tar.gz"
+  URL_HASH "SHA256=27f2fc0a74d39476ad968a61318dec65a82b109c4a462b9fa22be45425ddaaad"
   CONFIGURE_COMMAND ""
   BUILD_COMMAND ""
   INSTALL_COMMAND "")
 
-  install(FILES "${PROJECT_BINARY_DIR}/cloudtrail-rules-prefix/src/cloudtrail-rules/aws_cloudtrail_rules.yaml" DESTINATION "${FALCO_ETC_DIR}" COMPONENT "${PLUGINS_COMPONENT_NAME}")
+install(FILES "${PROJECT_BINARY_DIR}/cloudtrail-rules-prefix/src/cloudtrail-rules/aws_cloudtrail_rules.yaml" DESTINATION "${FALCO_ETC_DIR}" COMPONENT "${PLUGINS_COMPONENT_NAME}")
 
-set(PLUGIN_JSON_VERSION "0.6.0")
+# json
+set(PLUGIN_JSON_VERSION "0.7.0")
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-    set(PLUGIN_JSON_HASH "15fb7eddd978e8bb03f05412e9446e264e4548d7423b3d724b99d6d87a8c1b27")
+    set(PLUGIN_JSON_HASH "a7bf52009a935f22b473724f722566fde27aec5c7d618ecd426eed81e477e94d")
 else() # aarch64
-    set(PLUGIN_JSON_HASH "4db23f35a750e10a5b7b54c9aa469a7587705e7faa22927e941b41f3c5533e9f")
+    set(PLUGIN_JSON_HASH "9cd65fac3f1cbc7f723b69671d42d35901cd322a23d8f2b9dc95fb0593918a7e")
 endif()
 
 ExternalProject_Add(
   json-plugin
-  URL "https://download.falco.org/plugins/stable/json-${PLUGIN_JSON_VERSION}-${PLUGINS_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz"
+  URL "https://download.falco.org/plugins/${PLUGINS_DOWNLOAD_BUCKET}/json-${PLUGIN_JSON_VERSION}-${PLUGINS_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz"
   URL_HASH "SHA256=${PLUGIN_JSON_HASH}"
   CONFIGURE_COMMAND ""
   BUILD_COMMAND ""

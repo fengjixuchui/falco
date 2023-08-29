@@ -18,6 +18,7 @@ set(FALCO_ENGINE_SOURCE_FILES
     json_evt.cpp
     evttype_index_ruleset.cpp
     formats.cpp
+    filter_details_resolver.cpp
     filter_macro_resolver.cpp
     filter_warning_resolver.cpp
     stats_manager.cpp
@@ -27,6 +28,10 @@ set(FALCO_ENGINE_SOURCE_FILES
     rule_loader_compiler.cpp)
 
 add_library(falco_engine STATIC ${FALCO_ENGINE_SOURCE_FILES})
+
+if (EMSCRIPTEN)
+	target_compile_options(falco_engine PRIVATE "-sDISABLE_EXCEPTION_CATCHING=0")
+endif()
 
 add_dependencies(falco_engine yamlcpp njson)
 

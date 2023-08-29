@@ -36,7 +36,9 @@ options::options()
 	  list_plugins(false),
 	  list_syscall_events(false),
 	  markdown(false),
-	  modern_bpf(false)
+	  modern_bpf(false),
+	  dry_run(false),
+	  nodriver(false)
 {
 }
 
@@ -140,12 +142,20 @@ bool options::parse(int argc, char **argv, std::string &errstr)
 		return false;
 	}
 
-	if (daemon && pidfilename == "") {
-		errstr = std::string("If -d is provided, a pid file must also be provided");
+	list_fields = m_cmdline_parsed.count("list") > 0 ? true : false;
+
+	int open_modes = 0;
+	open_modes += !trace_filename.empty();
+	open_modes += userspace;
+	open_modes += !gvisor_config.empty();
+	open_modes += modern_bpf;
+	open_modes += getenv("FALCO_BPF_PROBE") != NULL;
+	open_modes += nodriver;
+	if (open_modes > 1)
+	{
+		errstr = std::string("You can not specify more than one of -e, -u (--userspace), -g (--gvisor-config), --modern-bpf, --nodriver, and the FALCO_BPF_PROBE env var");
 		return false;
 	}
-
-	list_fields = m_cmdline_parsed.count("list") > 0 ? true : false;
 
 	return true;
 }
@@ -164,11 +174,12 @@ void options::define(cxxopts::Options& opts)
 #else
 		("c",                             "Configuration file. If not specified tries " FALCO_SOURCE_CONF_FILE ", " FALCO_INSTALL_CONF_FILE ".", cxxopts::value(conf_filename), "<path>")
 #endif
-		("A",                             "Monitor each event defined in rules and configs + high volume I/O syscalls. Please use the -i option to list the I/O syscalls Falco supports. This option affects live captures only. Setting -A can impact performance.", cxxopts::value(all_events)->default_value("false"))
+		("A",                             "Monitor all events supported by Falco defined in rules and configs. Please use the -i option to list the events ignored by default without -A. This option affects live captures only. Setting -A can impact performance.", cxxopts::value(all_events)->default_value("false"))
 		("b,print-base64",                "Print data buffers in base64. This is useful for encoding binary data that needs to be used over media designed to consume this format.")
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 		("cri",                           "Path to CRI socket for container metadata. Use the specified socket to fetch data from a CRI-compatible runtime. If not specified, uses the libs default. This option can be passed multiple times to specify socket to be tried until a successful one is found.", cxxopts::value(cri_socket_paths), "<path>")
-		("d,daemon",                      "Run as a daemon.", cxxopts::value(daemon)->default_value("false"))
 		("disable-cri-async",             "Disable asynchronous CRI metadata fetching. This is useful to let the input event wait for the container metadata fetch to finish before moving forward. Async fetching, in some environments leads to empty fields for container metadata when the fetch is not fast enough to be completed asynchronously. This can have a performance penalty on your environment depending on the number of containers and the frequency at which they are created/started/stopped.", cxxopts::value(disable_cri_async)->default_value("false"))
+#endif
 		("disable-source",                "Disable a specific event source. By default, all loaded sources get enabled. Available sources are 'syscall' and all sources defined by loaded plugins supporting the event sourcing capability. This option can be passed multiple times. This has no offect when reading events from a trace file. Can not disable all event sources. Can not be mixed with --enable-source.", cxxopts::value(disable_sources), "<event_source>")
 		("dry-run",                       "Run Falco without proceesing events. Can be useful for checking that the configuration and rules do not have any errors.", cxxopts::value(dry_run)->default_value("false"))
 		("D",                             "Disable any rules with names having the substring <substring>. This option can be passed multiple times. Can not be mixed with -t.", cxxopts::value(disabled_rule_substrings), "<substring>")
@@ -180,37 +191,36 @@ void options::define(cxxopts::Options& opts)
 		("gvisor-root",					  "gVisor root directory for storage of container state. Equivalent to runsc --root flag.", cxxopts::value(gvisor_root), "<gvisor_root>")
 #endif
 #ifdef HAS_MODERN_BPF
-		("modern-bpf",				  "[EXPERIMENTAL] Use BPF modern probe to capture system events.", cxxopts::value(modern_bpf)->default_value("false"))
+		("modern-bpf",				  "Use BPF modern probe driver to instrument the kernel.", cxxopts::value(modern_bpf)->default_value("false"))
 #endif
-		("i",                             "Print all high volume I/O syscalls that are ignored by default (i.e. without the -A flag) and exit.", cxxopts::value(print_ignored_events)->default_value("false"))
-#ifndef MINIMAL_BUILD
+		("i",                             "Print all high volume syscalls that are ignored by default for performance reasons (i.e. without the -A flag) and exit.", cxxopts::value(print_ignored_events)->default_value("false"))
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 		("k,k8s-api",                     "Enable Kubernetes support by connecting to the API server specified as argument. E.g. \"http://admin:password@127.0.0.1:8080\". The API server can also be specified via the environment variable FALCO_K8S_API.", cxxopts::value(k8s_api), "<url>")
 		("K,k8s-api-cert",                "Use the provided files names to authenticate user and (optionally) verify the K8S API server identity. Each entry must specify full (absolute, or relative to the current directory) path to the respective file. Private key password is optional (needed only if key is password protected). CA certificate is optional. For all files, only PEM file format is supported. Specifying CA certificate only is obsoleted - when single entry is provided for this option, it will be interpreted as the name of a file containing bearer token. Note that the format of this command-line option prohibits use of files whose names contain ':' or '#' characters in the file name.", cxxopts::value(k8s_api_cert), "(<bt_file> | <cert_file>:<key_file[#password]>[:<ca_cert_file>])")
 		("k8s-node",                      "The node name will be used as a filter when requesting metadata of pods to the API server. Usually, this should be set to the current node on which Falco is running. If empty, no filter is set, which may have a performance penalty on large clusters.", cxxopts::value(k8s_node_name), "<node_name>")
 #endif
-		("L",                             "Show the name and description of all rules and exit.", cxxopts::value(describe_all_rules)->default_value("false"))
-		("l",                             "Show the name and description of the rule with name <rule> and exit.", cxxopts::value(describe_rule), "<rule>")
+		("L",                             "Show the name and description of all rules and exit. If json_output is set to true, it prints details about all rules, macros and lists in JSON format", cxxopts::value(describe_all_rules)->default_value("false"))
+		("l",                             "Show the name and description of the rule with name <rule> and exit. If json_output is set to true, it prints details about the rule in JSON format", cxxopts::value(describe_rule), "<rule>")
 		("list",                          "List all defined fields. If <source> is provided, only list those fields for the source <source>. Current values for <source> are \"syscall\" or any source from a configured plugin with event sourcing capability.", cxxopts::value(list_source_fields)->implicit_value(""), "<source>")
 		("list-syscall-events",  		  "List all defined system call events.", cxxopts::value<bool>(list_syscall_events))
-#ifndef MUSL_OPTIMIZED
 		("list-plugins",                  "Print info on all loaded plugins and exit.", cxxopts::value(list_plugins)->default_value("false"))
-#endif
 		("M",                             "Stop collecting after <num_seconds> reached.", cxxopts::value(duration_to_tot)->default_value("0"), "<num_seconds>")
 		("markdown",                      "When used with --list/--list-syscall-events, print the content in Markdown format", cxxopts::value<bool>(markdown))
 		("N",                             "When used with --list, only print field names.", cxxopts::value(names_only)->default_value("false"))
+		("nodriver",                      "Do not use a driver to instrument the kernel. If a loaded plugin has event sourcing capability and can produce system events, it will be used to for event collection.", cxxopts::value(nodriver)->default_value("false"))
 		("o,option",                      "Set the value of option <opt> to <val>. Overrides values in configuration file. <opt> can be identified using its location in configuration file using dot notation. Elements which are entries of lists can be accessed via square brackets [].\n    E.g. base.id = val\n         base.subvalue.subvalue2 = val\n         base.list[1]=val", cxxopts::value(cmdline_config_options), "<opt>=<val>")
 		("plugin-info",                   "Print info for a single plugin and exit.\nThis includes all descriptivo info like name and author, along with the\nschema format for the init configuration and a list of suggested open parameters.\n<plugin_name> can be the name of the plugin or its configured library_path.", cxxopts::value(print_plugin_info), "<plugin_name>")
-		("p,print",                       "Add additional information to each falco notification's output.\nWith -pc or -pcontainer will use a container-friendly format.\nWith -pk or -pkubernetes will use a kubernetes-friendly format.\nAdditionally, specifying -pc/-pk will change the interpretation of %container.info in rule output fields.", cxxopts::value(print_additional), "<output_format>")
-		("P,pidfile",                     "When run as a daemon, write pid to specified file", cxxopts::value(pidfilename)->default_value("/var/run/falco.pid"), "<pid_file>")
+		("p,print",                       "Print (or replace) additional information in rule's output.\nUse -pc or -pcontainer to append container details.\nUse -pk or -pkubernetes to add both container and Kubernetes details.\nIf using gVisor, choose -pcg or -pkg variants (or -pcontainer-gvisor and -pkubernetes-gvisor, respectively).\nIf a rule's output contains %container.info, it will be replaced with the corresponding details. Otherwise, these details will be directly appended to the rule's output.\nAlternatively, use -p \"...\" for a custom format. In this case, the given content will be appended to the rule's output without any replacement.", cxxopts::value(print_additional), "<output_format>")
+		("P,pidfile",                     "Write pid to specified file, by default no pidfile is created.", cxxopts::value(pidfilename)->default_value(""), "<pid_file>")
 		("r",                             "Rules file/directory (defaults to value set in configuration file, or /etc/falco_rules.yaml). This option can be passed multiple times to read from multiple files/directories.", cxxopts::value<std::vector<std::string>>(), "<rules_file>")
-		("s",                             "If specified, append statistics related to Falco's reading/processing of events to this file (only useful in live mode).", cxxopts::value(stats_filename), "<stats_file>")
-		("stats-interval",                "When using -s <stats_file>, write statistics every <msec> ms. This uses signals, so don't recommend intervals below 200 ms. Defaults to 5000 (5 seconds).", cxxopts::value(stats_interval)->default_value("5000"),  "<msec>")
-		("S,snaplen",                     "Capture the first <len> bytes of each I/O buffer. By default, the first 80 bytes are captured. Use this option with caution, it can generate huge trace files.", cxxopts::value(snaplen)->default_value("0"), "<len>")
+		("S,snaplen",                     "Capture the first <len> bytes of each I/O buffer. By default, the first 80 bytes are captured. Use this option with caution, it can have a strong performance impact.", cxxopts::value(snaplen)->default_value("0"), "<len>")
 		("support",                       "Print support information including version, rules files used, etc. and exit.", cxxopts::value(print_support)->default_value("false"))
 		("T",                             "Disable any rules with a tag=<tag>. This option can be passed multiple times. Can not be mized with -t", cxxopts::value<std::vector<std::string>>(), "<tag>")
 		("t",                             "Only run those rules with a tag=<tag>. This option can be passed multiple times. Can not be mixed with -T/-D.", cxxopts::value<std::vector<std::string>>(), "<tag>")
 		("U,unbuffered",                  "Turn off output buffering to configured outputs. This causes every single line emitted by falco to be flushed which generates higher CPU usage but is useful when piping those outputs into another process or into a script.", cxxopts::value(unbuffered_outputs)->default_value("false"))
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 		("u,userspace",                   "Parse events from userspace. To be used in conjunction with the ptrace(2) based driver (pdig)", cxxopts::value(userspace)->default_value("false"))
+#endif
 		("V,validate",                    "Read the contents of the specified rules(s) file and exit. This option can be passed multiple times to validate multiple files.", cxxopts::value(validate_rules_filenames), "<rules_file>")
 		("v",                             "Verbose output.", cxxopts::value(verbose)->default_value("false"))
 		("version",                       "Print version number.", cxxopts::value(print_version_info)->default_value("false"))

@@ -27,6 +27,9 @@ limitations under the License.
 #include <fstream>
 #include <functional>
 #include <utility>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <sinsp.h>
 #include <plugin.h>
@@ -42,6 +45,7 @@ limitations under the License.
 #include "utils.h"
 #include "banned.h" // This raises a compilation error when certain functions are used
 #include "evttype_index_ruleset.h"
+#include "filter_details_resolver.h"
 
 const std::string falco_engine::s_default_ruleset = "falco-default-ruleset";
 
@@ -152,8 +156,7 @@ void falco_engine::list_fields(std::string &source, bool verbose, bool names_onl
 			{
 				for(auto &field : fld_class.fields)
 				{
-					// Skip fields with the EPF_TABLE_ONLY flag.
-					if(field.tags.find("EPF_TABLE_ONLY") != field.tags.end())
+					if(field.is_skippable() || field.is_deprecated())
 					{
 						continue;
 					}
@@ -350,7 +353,8 @@ std::shared_ptr<gen_event_formatter> falco_engine::create_formatter(const std::s
 	return find_source(source)->formatter_factory->create_formatter(output);
 }
 
-std::unique_ptr<falco_engine::rule_result> falco_engine::process_event(std::size_t source_idx, gen_event *ev, uint16_t ruleset_id)
+std::unique_ptr<std::vector<falco_engine::rule_result>> falco_engine::process_event(std::size_t source_idx,
+	gen_event *ev, uint16_t ruleset_id, falco_common::rule_matching strategy)
 {
 	// note: there are no thread-safety guarantees on the filter_ruleset::run()
 	// method, but the thread-safety assumptions of falco_engine::process_event()
@@ -374,26 +378,57 @@ std::unique_ptr<falco_engine::rule_result> falco_engine::process_event(std::size
 		source = find_source(source_idx);
 	}
 
-	if(should_drop_evt() || !source || !source->ruleset->run(ev, source->m_rule, ruleset_id))
+	if(should_drop_evt() || !source)
 	{
-		return std::unique_ptr<struct rule_result>();
+		return nullptr;
 	}
 
-	std::unique_ptr<struct rule_result> res(new rule_result());
-	res->evt = ev;
-	res->rule = source->m_rule.name;
-	res->source = source->m_rule.source;
-	res->format = source->m_rule.output;
-	res->priority_num = source->m_rule.priority;
-	res->tags = source->m_rule.tags;
-	res->exception_fields = source->m_rule.exception_fields;
-	m_rule_stats_manager.on_event(source->m_rule);
+	switch (strategy)
+	{
+	case falco_common::rule_matching::ALL:
+		if (source->m_rules.size() > 0)
+		{
+			source->m_rules.clear();
+		}
+		if (!source->ruleset->run(ev, source->m_rules, ruleset_id))
+		{
+			return nullptr;
+		}
+		break;
+	case falco_common::rule_matching::FIRST:
+		if (source->m_rules.size() != 1)
+		{
+			source->m_rules.resize(1);
+		}
+		if (!source->ruleset->run(ev, source->m_rules[0], ruleset_id))
+		{
+			return nullptr;
+		}
+		break;
+	}
+
+	auto res = std::make_unique<std::vector<falco_engine::rule_result>>();
+	for(auto rule : source->m_rules)
+	{
+		rule_result rule_result;
+		rule_result.evt = ev;
+		rule_result.rule = rule.name;
+		rule_result.source = rule.source;
+		rule_result.format = rule.output;
+		rule_result.priority_num = rule.priority;
+		rule_result.tags = rule.tags;
+		rule_result.exception_fields = rule.exception_fields;
+		m_rule_stats_manager.on_event(rule);
+		res->push_back(rule_result);
+	}
+
 	return res;
 }
 
-std::unique_ptr<falco_engine::rule_result> falco_engine::process_event(std::size_t source_idx, gen_event *ev)
+std::unique_ptr<std::vector<falco_engine::rule_result>> falco_engine::process_event(std::size_t source_idx,
+	gen_event *ev, falco_common::rule_matching strategy)
 {
-	return process_event(source_idx, ev, m_default_ruleset_id);
+	return process_event(source_idx, ev, m_default_ruleset_id, strategy);
 }
 
 std::size_t falco_engine::add_source(const std::string &source,
@@ -427,26 +462,322 @@ std::size_t falco_engine::add_source(const std::string &source,
 	return m_sources.insert(src, source);
 }
 
-void falco_engine::describe_rule(std::string *rule) const
+void falco_engine::describe_rule(std::string *rule, bool json) const
 {
-	static const char* rule_fmt = "%-50s %s\n";
-	fprintf(stdout, rule_fmt, "Rule", "Description");
-	fprintf(stdout, rule_fmt, "----",  "-----------");
-	if (!rule)
+	if(!json)
 	{
-		for (auto &r : m_rules)
+		static const char *rule_fmt = "%-50s %s\n";
+		fprintf(stdout, rule_fmt, "Rule", "Description");
+		fprintf(stdout, rule_fmt, "----", "-----------");
+		if(!rule)
 		{
-			auto str = falco::utils::wrap_text(r.description, 51, 110) + "\n";
-			fprintf(stdout, rule_fmt, r.name.c_str(), str.c_str());
+			for(auto &r : m_rules)
+			{
+				auto str = falco::utils::wrap_text(r.description, 51, 110) + "\n";
+				fprintf(stdout, rule_fmt, r.name.c_str(), str.c_str());
+			}
 		}
+		else
+		{
+			auto r = m_rules.at(*rule);
+			if(r == nullptr)
+			{
+				return;
+			}
+			auto str = falco::utils::wrap_text(r->description, 51, 110) + "\n";
+			fprintf(stdout, rule_fmt, r->name.c_str(), str.c_str());
+		}
+
+		return;
 	}
+
+	std::unique_ptr<sinsp> insp(new sinsp());
+	Json::FastWriter writer;
+	std::string json_str;
+
+	if(!rule)
+	{
+		// In this case we build json information about
+		// all rules, macros and lists
+		Json::Value output;
+
+		// Store required engine version
+		auto required_engine_version = m_rule_collector.required_engine_version();
+		output["required_engine_version"] = std::to_string(required_engine_version.version);
+
+		// Store required plugin versions
+		Json::Value plugin_versions = Json::arrayValue;
+		auto required_plugin_versions = m_rule_collector.required_plugin_versions();
+		for(const auto& req : required_plugin_versions)
+		{
+			Json::Value r;
+			r["name"] = req.at(0).name;
+			r["version"] = req.at(0).version;
+
+			Json::Value alternatives = Json::arrayValue;
+			for(size_t i = 1; i < req.size(); i++)
+			{
+				Json::Value alternative;
+				alternative["name"] = req[i].name;
+				alternative["version"] = req[i].version;
+				alternatives.append(alternative);
+			}
+			r["alternatives"] = alternatives;
+			
+			plugin_versions.append(r);
+		}
+		output["required_plugin_versions"] = plugin_versions;
+
+		// Store information about rules
+		Json::Value rules_array = Json::arrayValue;
+		for(const auto& r : m_rules)
+		{
+			auto ri = m_rule_collector.rules().at(r.name);
+			Json::Value rule;
+			get_json_details(r, *ri, insp.get(), rule);
+
+			// Append to rule array
+			rules_array.append(rule);
+		}
+		output["rules"] = rules_array;
+		
+		// Store information about macros
+		Json::Value macros_array;
+		for(const auto &m : m_rule_collector.macros())
+		{
+			Json::Value macro;
+			get_json_details(m, macro);
+			macros_array.append(macro);
+		}
+		output["macros"] = macros_array;
+
+		// Store information about lists 
+		Json::Value lists_array = Json::arrayValue;
+		for(const auto &l : m_rule_collector.lists())
+		{
+			Json::Value list;
+			get_json_details(l, list);
+			lists_array.append(list);			
+		}
+		output["lists"] = lists_array;
+
+		json_str = writer.write(output);
+	} 
 	else
 	{
-		auto r = m_rules.at(*rule);
-		auto str = falco::utils::wrap_text(r->description, 51, 110) + "\n";
-		fprintf(stdout, rule_fmt, r->name.c_str(), str.c_str());
+		// build json information for just the specified rule
+		auto ri = m_rule_collector.rules().at(*rule);
+		if(ri == nullptr)
+		{
+			throw falco_exception("Rule \"" + *rule + "\" is not loaded");
+		}
+		auto r = m_rules.at(ri->name);
+		Json::Value rule; 
+		get_json_details(*r, *ri, insp.get(), rule);
+		json_str = writer.write(rule);
+	}
+
+	fprintf(stdout, "%s", json_str.c_str());
+}
+
+void falco_engine::get_json_details(const falco_rule &r,
+	const rule_loader::rule_info &ri,
+	sinsp *insp,
+	Json::Value &rule) const
+{
+	Json::Value rule_info;
+
+	// Fill general rule information
+	rule_info["name"] = r.name;
+	rule_info["condition"] = ri.cond;
+	rule_info["priority"] = format_priority(r.priority, false);
+	rule_info["output"] = r.output;
+	rule_info["description"] = r.description;
+	rule_info["enabled"] = ri.enabled;
+	rule_info["source"] = r.source;
+	Json::Value tags = Json::arrayValue;
+	for(const auto &t : ri.tags)
+	{
+		tags.append(t);
+	}
+	rule_info["tags"] = tags;
+	rule["info"] = rule_info;
+
+	// Parse rule condition and build the AST
+	// Assumption: no exception because rules have already been loaded.
+	auto ast = libsinsp::filter::parser(ri.cond).parse();
+	Json::Value json_details;
+	get_json_details(ast.get(), json_details);
+	rule["details"] = json_details;
+
+	// Get fields from output string
+	auto fmt = create_formatter(r.source, r.output);
+	std::vector<std::string> out_fields;
+	fmt->get_field_names(out_fields);
+	Json::Value outputFields = Json::arrayValue;
+	for(const auto &of : out_fields)
+	{
+		outputFields.append(of);
+	}
+	rule["details"]["output_fields"] = outputFields;
+
+	// Get fields from exceptions
+	Json::Value exception_fields = Json::arrayValue;
+	for(const auto &f : r.exception_fields)
+	{
+		exception_fields.append(f);
+	}
+	rule["details"]["exception_fields"] = exception_fields;
+
+	// Get names and operators from exceptions
+	Json::Value exception_names = Json::arrayValue;
+	Json::Value exception_operators = Json::arrayValue;
+	for(const auto &e : ri.exceptions)
+	{
+		exception_names.append(e.name);
+		if(e.comps.is_list)
+		{
+			for(const auto& c : e.comps.items)
+			{
+				if(c.is_list)
+				{
+					// considering max two levels of lists
+					for(const auto& i : c.items)
+					{
+						exception_operators.append(i.item);
+					}
+				}
+				else
+				{
+					exception_operators.append(c.item);
+				}
+			}
+		}
+		else
+		{
+			exception_operators.append(e.comps.item);
+		}	
+	}
+	rule["details"]["exceptions"] = exception_names;
+	rule["details"]["exception_operators"] = exception_operators;
+
+	if(ri.source == falco_common::syscall_source)
+	{
+		// Store event types
+		Json::Value events;
+		get_json_evt_types(ast.get(), events);
+		rule["details"]["events"] = events;
 	}
 }
+
+void falco_engine::get_json_details(const rule_loader::macro_info& m,
+	Json::Value& macro) const
+{
+	Json::Value macro_info;
+
+	macro_info["name"] = m.name;
+	macro_info["condition"] = m.cond;
+	macro["info"] = macro_info;
+
+	// Assumption: no exception because rules have already been loaded.
+	auto ast = libsinsp::filter::parser(m.cond).parse();
+
+	Json::Value json_details;
+	get_json_details(ast.get(), json_details);
+	macro["details"] = json_details;
+
+	// Store event types
+	Json::Value events;
+	get_json_evt_types(ast.get(), events);
+	macro["details"]["events"] = events;
+}
+
+void falco_engine::get_json_details(const rule_loader::list_info& l, 
+	Json::Value& list) const
+{
+	Json::Value list_info;
+	list_info["name"] = l.name;
+
+	Json::Value items = Json::arrayValue;
+	Json::Value lists = Json::arrayValue;
+	for(const auto &i : l.items)
+	{
+		if(m_rule_collector.lists().at(i) != nullptr)
+		{
+			lists.append(i);
+			continue;
+		}
+		items.append(i);
+	}
+
+	list_info["items"] = items;
+	list["info"] = list_info;
+	list["details"]["lists"] = lists;
+}
+
+void falco_engine::get_json_details(libsinsp::filter::ast::expr* ast,
+	Json::Value& output) const
+{
+	filter_details details;
+	for(const auto &m : m_rule_collector.macros())
+	{
+		details.known_macros.insert(m.name);
+	}
+
+	for(const auto &l : m_rule_collector.lists())
+	{
+		details.known_lists.insert(l.name);
+	}
+
+	// Resolve the AST details
+	filter_details_resolver resolver;
+	resolver.run(ast, details);
+
+	Json::Value macros = Json::arrayValue;
+	for(const auto &m : details.macros)
+	{
+		macros.append(m);
+	}
+	output["macros"] = macros;
+
+	Json::Value operators = Json::arrayValue;
+	for(const auto &o : details.operators)
+	{
+		operators.append(o);
+	}
+	output["operators"] = operators;
+
+	Json::Value condition_fields = Json::arrayValue;
+	for(const auto &f : details.fields)
+	{
+		condition_fields.append(f);
+	}
+	output["condition_fields"] = condition_fields;
+
+	Json::Value lists = Json::arrayValue;
+	for(const auto &l : details.lists)
+	{
+		lists.append(l);
+	}
+	output["lists"] = lists;
+	
+	details.reset();
+}
+
+void falco_engine::get_json_evt_types(libsinsp::filter::ast::expr* ast,
+					Json::Value& output) const
+{
+	output = Json::arrayValue;
+	auto evtcodes = libsinsp::filter::ast::ppm_event_codes(ast);
+	auto syscodes = libsinsp::filter::ast::ppm_sc_codes(ast);
+	auto syscodes_to_evt_names = libsinsp::events::sc_set_to_event_names(syscodes);
+	auto evtcodes_to_evt_names = libsinsp::events::event_set_to_names(evtcodes, false);
+	for (const auto& n : unordered_set_union(syscodes_to_evt_names, evtcodes_to_evt_names))
+	{
+		output.append(n);
+	}
+}
+
 
 void falco_engine::print_stats() const
 {
