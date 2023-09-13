@@ -27,10 +27,7 @@ if [[ -z "${SKIP_DRIVER_LOADER}" ]]; then
         ln -s "$i" "/usr/src/$base"
     done
 
-    # convert the optional space-separated env variable FALCO_DRIVER_LOADER_OPTIONS to array, prevent 
-    # shell expansion and use it as argument list for falco-driver-loader
-    read -a falco_driver_loader_option_arr <<< $FALCO_DRIVER_LOADER_OPTIONS
-    /usr/bin/falco-driver-loader "${falco_driver_loader_option_arr[@]}"
+    /usr/bin/falco-driver-loader
 fi
 
 exec "$@"

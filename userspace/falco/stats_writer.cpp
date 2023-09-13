@@ -91,6 +91,11 @@ stats_writer::stats_writer(
 	m_config = config;
 	if (config->m_metrics_enabled)
 	{
+		/* m_outputs should always be initialized because we use it
+		 * to extract output-queue stats in both cases: rule output and file output.
+		 */
+		m_outputs = outputs;
+
 		if (!config->m_metrics_output_file.empty())
 		{
 			m_file_output.exceptions(std::ofstream::failbit | std::ofstream::badbit);
@@ -100,7 +105,6 @@ stats_writer::stats_writer(
 
 		if (config->m_metrics_stats_rule_enabled)
 		{
-			m_outputs = outputs;
 			m_initialized = true;
 		}
 	}
@@ -108,6 +112,9 @@ stats_writer::stats_writer(
 	if (m_initialized)
 	{
 #ifndef __EMSCRIPTEN__
+		// capacity and controls should not be relevant for stats outputs, adopt capacity
+		// for completeness, but do not implement config recovery strategies.
+		m_queue.set_capacity(config->m_outputs_queue_capacity);
 		m_worker = std::thread(&stats_writer::worker, this);
 #endif
 	}
@@ -156,7 +163,6 @@ inline void stats_writer::push(const stats_writer::msg& m)
 void stats_writer::worker() noexcept
 {
 	stats_writer::msg m;
-	nlohmann::json jmsg;
 	bool use_outputs = m_config->m_metrics_stats_rule_enabled;
 	bool use_file = !m_config->m_metrics_output_file.empty();
 	auto tick = stats_writer::get_ticker();
@@ -195,6 +201,7 @@ void stats_writer::worker() noexcept
 
 				if (use_file)
 				{
+					nlohmann::json jmsg;
 					jmsg["sample"] = m_total_samples;
 					jmsg["output_fields"] = m.output_fields;
 					m_file_output << jmsg.dump() << std::endl;
@@ -234,6 +241,7 @@ void stats_writer::collector::get_metrics_output_fields_wrapper(
 	output_fields["falco.host_boot_ts"] = machine_info->boot_ts_epoch;
 	output_fields["falco.hostname"] = machine_info->hostname; /* Explicitly add hostname to log msg in case hostname rule output field is disabled. */
 	output_fields["falco.host_num_cpus"] = machine_info->num_cpus;
+	output_fields["falco.outputs_queue_num_drops"] = m_writer->m_outputs->get_outputs_queue_num_drops();
 
 	output_fields["evt.source"] = src;
 	for (size_t i = 0; i < sizeof(all_driver_engines) / sizeof(const char*); i++)
