@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
 Copyright (C) 2023 The Falco Authors.
 
@@ -74,7 +75,6 @@ public:
 	std::set<std::string> disabled_rule_tags;
 	std::set<std::string> enabled_rule_tags;
 	bool unbuffered_outputs;
-	bool userspace;
 	std::vector<std::string> validate_rules_filenames;
 	bool verbose;
 	bool print_version_info;

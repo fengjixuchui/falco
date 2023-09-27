@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (C) 2022 The Falco Authors.
+# Copyright (C) 2023 The Falco Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 # the License. You may obtain a copy of the License at
@@ -33,8 +34,8 @@ else()
   # In case you want to test against another driver version (or branch, or commit) just pass the variable -
   # ie., `cmake -DDRIVER_VERSION=dev ..`
   if(NOT DRIVER_VERSION)
-    set(DRIVER_VERSION "6.0.0+driver")
-    set(DRIVER_CHECKSUM "SHA256=573cef7b9c69cfe1d5d8b873d2a20ad8235a2a96997df6bcebd120692dee7a91")
+    set(DRIVER_VERSION "6.0.1+driver")
+    set(DRIVER_CHECKSUM "SHA256=2b4412b5053c8ed5bd1a9de745faa16ec0210dc65dc858af65951d4c8d22207c")
   endif()
 
   # cd /path/to/build && cmake /path/to/source

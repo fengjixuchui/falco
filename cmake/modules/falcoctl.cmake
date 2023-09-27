@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 #
 # Copyright (C) 2023 The Falco Authors.
 #
@@ -15,14 +16,14 @@ include(ExternalProject)
 
 string(TOLOWER ${CMAKE_HOST_SYSTEM_NAME} FALCOCTL_SYSTEM_NAME)
 
-set(FALCOCTL_VERSION "0.6.0")
+set(FALCOCTL_VERSION "0.6.2")
 
 if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
     set(FALCOCTL_SYSTEM_PROC_GO "amd64")
-    set(FALCOCTL_HASH "b81c36449b525e1de871288741beeadead021ac133d9b306f0636be1befe58a5")
+    set(FALCOCTL_HASH "2d06d7577dbae91fb085f71477ff6e22076a815978bddd036984fa077236a515")
 else() # aarch64
     set(FALCOCTL_SYSTEM_PROC_GO "arm64")
-    set(FALCOCTL_HASH "6e99fd765f67cdd46fa8c5b2969e97497856d2e615698ced04046c8898187b18")
+    set(FALCOCTL_HASH "0b711a1b3499f479d999f4f4d2c94fc4f0bc23a2506711b613e6eedb0593631b")
 endif()
 
 ExternalProject_Add(
