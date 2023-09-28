@@ -33,6 +33,7 @@ struct filter_details
 	std::unordered_set<std::string> macros;
 	std::unordered_set<std::string> operators;
 	std::unordered_set<std::string> lists;
+	std::unordered_set<std::string> evtnames;
 
 	void reset();
 };
@@ -59,7 +60,8 @@ private:
 		visitor(filter_details& details) : 
 			m_details(details),
 			m_expect_list(false),
-			m_expect_macro(false) {}
+			m_expect_macro(false),
+			m_expect_evtname(false) {}
 		visitor(visitor&&) = default;
 		visitor& operator = (visitor&&) = default;
 		visitor(const visitor&) = delete;
@@ -76,5 +78,6 @@ private:
 		filter_details& m_details;
 		bool m_expect_list;
 		bool m_expect_macro;
+		bool m_expect_evtname;
 	};
 };
