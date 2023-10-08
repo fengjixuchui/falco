@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Clone repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.0
           
       - name: Extract LIBS and DRIVER versions
         run: |
@@ -161,7 +161,7 @@ jobs:
           echo "#### Release Manager @${{ github.event.release.author.login }}" >> release-body.md
         
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
         with:
           body_path: ./release-body.md
           tag_name: ${{ github.event.release.tag_name }}

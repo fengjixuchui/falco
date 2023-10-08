@@ -146,9 +146,11 @@ const indexed_vector<rule_loader::rule_info>& rule_loader::collector::rules() co
 void rule_loader::collector::define(configuration& cfg, engine_version_info& info)
 {
 	auto v = falco_engine::engine_version();
-	THROW(v < info.version, "Rules require engine version "
-	      + std::to_string(info.version) + ", but engine version is " + std::to_string(v),
+	THROW(!v.compatible_with(info.version), "Rules require engine version "
+	      + info.version.as_string() + ", but engine version is " + v.as_string(),
 	      info.ctx);
+		  
+	// Store max required_engine_version
 	if(m_required_engine_version.version < info.version)
 	{
 		m_required_engine_version = info;
@@ -161,7 +163,7 @@ void rule_loader::collector::define(configuration& cfg, plugin_version_info& inf
 	for (const auto& req : info.alternatives)
 	{
 		sinsp_version plugin_version(req.version);
-		THROW(!plugin_version.m_valid,
+		THROW(!plugin_version.is_valid(),
 			"Invalid required version '" + req.version
 				+ "' for plugin '" + req.name + "'",
 			info.ctx);

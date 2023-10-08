@@ -15,8 +15,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// The version of this Falco engine.
-#define FALCO_ENGINE_VERSION (26)
+#define __FALCO_ENGINE_STRINGIFY1(str) #str
+#define __FALCO_ENGINE_STRINGIFY(str) __FALCO_ENGINE_STRINGIFY1(str)
+
+// The version of this Falco engine
+#define FALCO_ENGINE_VERSION_MAJOR 0
+#define FALCO_ENGINE_VERSION_MINOR 26
+#define FALCO_ENGINE_VERSION_PATCH 0
+
+#define FALCO_ENGINE_VERSION \
+	__FALCO_ENGINE_STRINGIFY(FALCO_ENGINE_VERSION_MAJOR) "." \
+	__FALCO_ENGINE_STRINGIFY(FALCO_ENGINE_VERSION_MINOR) "." \
+	__FALCO_ENGINE_STRINGIFY(FALCO_ENGINE_VERSION_PATCH)
 
 // This is the result of running the following command:
 //   FALCO="falco -c ./falco.yaml"
@@ -24,4 +34,4 @@ limitations under the License.
 // It represents the fields supported by this version of Falco,
 // the event types, and the underlying driverevent schema. It's used to
 // detetect changes in engine version in our CI jobs.
-#define FALCO_ENGINE_CHECKSUM "98c6e665031b95c666a9ab02d5470e7008e8636bf02f4cc410912005b90dff5c"
+#define FALCO_ENGINE_CHECKSUM "df5b0b40d3e1dafc0de13459a4b889f8680ec154690f445952e74799920ae380"

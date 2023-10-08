@@ -19,6 +19,8 @@ limitations under the License.
 #include <vector>
 
 #include "rule_loader_reader.h"
+#include "falco_engine_version.h"
+#include "logger.h"
 
 #define THROW(cond, err, ctx)    { if ((cond)) { throw rule_loader::rule_load_exception(falco::load_result::LOAD_ERR_YAML_VALIDATE, (err), (ctx)); } }
 
@@ -255,8 +257,27 @@ static void read_item(
 	{
 		rule_loader::context ctx(item, rule_loader::context::REQUIRED_ENGINE_VERSION, "", parent);
 		rule_loader::engine_version_info v(ctx);
+		
+		try
+		{
+			// Convert convert to an uint (more restrictive than converting to a string)
+			uint32_t ver;
+			decode_val(item, "required_engine_version", ver, ctx);
 
-		decode_val(item, "required_engine_version", v.version, ctx);
+			// Build proper semver representation
+			v.version = rule_loader::reader::get_implicit_engine_version(ver);
+		} 
+		catch(std::exception& e)
+		{
+			// Convert to string
+			std::string ver;
+			decode_val(item, "required_engine_version", ver, ctx);
+
+			v.version = sinsp_version(ver);
+
+			THROW(!v.version.is_valid(), "Unable to parse engine version '" + ver + "' as a semver string. Expected \"x.y.z\" semver format.", ctx);
+		}
+
 		collector.define(cfg, v);
 	}
 	else if(item["required_plugin_versions"].IsDefined())
