@@ -21,7 +21,11 @@ option(MINIMAL_BUILD "Build a minimal version of Falco, containing only the engi
 option(MUSL_OPTIMIZED_BUILD "Enable if you want a musl optimized build" OFF)
 option(BUILD_FALCO_UNIT_TESTS "Build falco unit tests" OFF)
 
-if(EMSCRIPTEN)
+if(WIN32)
+	set(CPACK_GENERATOR "NSIS") # this needs NSIS installed, and available
+elseif (APPLE)
+	set(CPACK_GENERATOR "DragNDrop")
+elseif(EMSCRIPTEN)
   set(USE_BUNDLED_DEPS ON CACHE BOOL "" FORCE)
   set(BUILD_DRIVER OFF CACHE BOOL "" FORCE)
   set(ENABLE_DKMS OFF CACHE BOOL "" FORCE)
@@ -53,9 +57,6 @@ if (${EP_UPDATE_DISCONNECTED})
     PROPERTY EP_UPDATE_DISCONNECTED TRUE)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 # Elapsed time
 # set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND} -E time") # TODO(fntlnz, leodido): add a flag to enable this
 
@@ -83,56 +84,7 @@ else()
   set(FALCO_TARGET_ARCH ${CMAKE_SYSTEM_PROCESSOR})
 endif()
 
-if(NOT FALCO_EXTRA_DEBUG_FLAGS)
-  set(FALCO_EXTRA_DEBUG_FLAGS "-D_DEBUG")
-endif()
-
-string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
-if(CMAKE_BUILD_TYPE STREQUAL "debug")
-  set(KBUILD_FLAGS "${FALCO_EXTRA_DEBUG_FLAGS} ${FALCO_EXTRA_FEATURE_FLAGS}")
-else()
-  set(CMAKE_BUILD_TYPE "release")
-  set(KBUILD_FLAGS "${FALCO_EXTRA_FEATURE_FLAGS}")
-  add_definitions(-DBUILD_TYPE_RELEASE)
-endif()
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-
-if(MINIMAL_BUILD)
-  set(MINIMAL_BUILD_FLAGS "-DMINIMAL_BUILD")
-endif()
-
-if(MUSL_OPTIMIZED_BUILD)
-  set(MUSL_FLAGS "-static -Os -fPIE -pie")
-  add_definitions(-DMUSL_OPTIMIZED)
-endif()
-
-# explicitly set hardening flags
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(FALCO_SECURITY_FLAGS "")
-if(NOT EMSCRIPTEN)
-  set(FALCO_SECURITY_FLAGS "${FALCO_SECURITY_FLAGS} -Wl,-z,relro,-z,now -fstack-protector-strong")
-endif()
-if(CMAKE_BUILD_TYPE STREQUAL "release")
-  set(FALCO_SECURITY_FLAGS "${FALCO_SECURITY_FLAGS} -D_FORTIFY_SOURCE=2")
-endif()
-
-set(CMAKE_COMMON_FLAGS "${FALCO_SECURITY_FLAGS} -Wall -ggdb ${FALCO_EXTRA_FEATURE_FLAGS} ${MINIMAL_BUILD_FLAGS} ${MUSL_FLAGS}")
-
-if(BUILD_WARNINGS_AS_ERRORS)
-  set(CMAKE_SUPPRESSED_WARNINGS
-      "-Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-missing-field-initializers -Wno-sign-compare -Wno-type-limits -Wno-implicit-fallthrough -Wno-format-truncation -Wno-stringop-truncation -Wno-stringop-overflow -Wno-restrict"
-  )
-  set(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -Wextra -Werror ${CMAKE_SUPPRESSED_WARNINGS}")
-endif()
-
-set(CMAKE_C_FLAGS "${CMAKE_COMMON_FLAGS}")
-set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_COMMON_FLAGS} -Wno-class-memaccess")
-
-set(CMAKE_C_FLAGS_DEBUG "${FALCO_EXTRA_DEBUG_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG "${FALCO_EXTRA_DEBUG_FLAGS}")
-
-set(CMAKE_C_FLAGS_RELEASE "-O3 -fno-strict-aliasing -DNDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -fno-strict-aliasing -DNDEBUG")
+include(CompilerFlags)
 
 set(PACKAGE_NAME "falco")
 set(DRIVER_NAME "falco")
@@ -164,9 +116,6 @@ include(falcosecurity-libs)
 # compute FALCO_VERSION (depends on libs)
 include(falco-version)
 
-# jq
-include(jq)
-
 # nlohmann-json
 include(njson)
 
@@ -192,8 +141,8 @@ if (NOT EMSCRIPTEN)
   include(tbb)
 endif()
 
+include(zlib)
 if (NOT MINIMAL_BUILD)
-  include(zlib)
   if (NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN)
     include(cares)
     include(protobuf)
@@ -203,7 +152,16 @@ if (NOT MINIMAL_BUILD)
 endif()
 
 # Installation
-install(FILES falco.yaml DESTINATION "${FALCO_ETC_DIR}" COMPONENT "${FALCO_COMPONENT_NAME}")
+if(WIN32)
+	set(FALCO_INSTALL_CONF_FILE "%PROGRAMFILES%/${PACKAGE_NAME}-${FALCO_VERSION}/etc/falco/falco.yaml")
+	install(FILES falco.yaml DESTINATION etc/falco/ COMPONENT "${FALCO_COMPONENT_NAME}")
+elseif(APPLE)
+	set(FALCO_INSTALL_CONF_FILE "/etc/falco/falco.yaml")
+	install(FILES falco.yaml DESTINATION etc/falco/ COMPONENT "${FALCO_COMPONENT_NAME}")
+else()
+	set(FALCO_INSTALL_CONF_FILE "/etc/falco/falco.yaml")
+	install(FILES falco.yaml DESTINATION "${FALCO_ETC_DIR}" COMPONENT "${FALCO_COMPONENT_NAME}")
+endif()
 
 if(NOT MINIMAL_BUILD)
   # Coverage

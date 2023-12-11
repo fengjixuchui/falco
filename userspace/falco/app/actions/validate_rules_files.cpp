@@ -18,6 +18,8 @@ limitations under the License.
 #include "actions.h"
 #include "helpers.h"
 
+#include <plugin_manager.h>
+
 #include <string>
 
 using namespace falco::app;
@@ -66,10 +68,10 @@ falco::app::run_result falco::app::actions::validate_rules_files(falco::app::sta
 		// printed when verbose is true.
 		std::string summary;
 
-		falco_logger::log(LOG_INFO, "Validating rules file(s):\n");
+		falco_logger::log(falco_logger::level::INFO, "Validating rules file(s):\n");
 		for(auto file : s.options.validate_rules_filenames)
 		{
-			falco_logger::log(LOG_INFO, "   " + file + "\n");
+			falco_logger::log(falco_logger::level::INFO, "   " + file + "\n");
 		}
 
 		// The json output encompasses all files so the
@@ -121,15 +123,33 @@ falco::app::run_result falco::app::actions::validate_rules_files(falco::app::sta
 			}
 		}
 
+		// printout of `-L` option
+		nlohmann::json describe_res;
+		if (successful && (s.options.describe_all_rules || !s.options.describe_rule.empty()))
+		{
+			std::string* rptr = !s.options.describe_rule.empty() ? &(s.options.describe_rule) : nullptr;
+			const auto& plugins = s.offline_inspector->get_plugin_manager()->plugins();
+			describe_res = s.engine->describe_rule(rptr, plugins);
+		}
+
 		if(s.config->m_json_output)
 		{
 			nlohmann::json res;
 			res["falco_load_results"] = results;
-			printf("%s\n", res.dump().c_str());
+			if (!describe_res.empty() && successful)
+			{
+				res["falco_describe_results"] = std::move(describe_res);
+			}
+			std::cout << res.dump() << std::endl;
 		}
 		else
 		{
-			printf("%s\n", summary.c_str());
+			std::cout << summary << std::endl;
+			if (!describe_res.empty() && successful)
+			{
+				std::cout << std::endl;
+				format_described_rules_as_text(describe_res, std::cout);
+			}
 		}
 
 		if(successful)

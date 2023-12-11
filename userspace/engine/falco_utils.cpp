@@ -159,6 +159,7 @@ void readfile(const std::string& filename, std::string& data)
 
 	return;
 }
+
 namespace network
 {
 bool is_unix_scheme(const std::string& url)

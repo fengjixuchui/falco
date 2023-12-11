@@ -26,17 +26,17 @@ if(FALCOSECURITY_LIBS_SOURCE_DIR)
 else()
   # FALCOSECURITY_LIBS_REPO accepts a repository name (<org name>/<repo name>) alternative to the falcosecurity/libs repository.
   # In case you want to test against a fork of falcosecurity/libs just pass the variable -
-  # ie., `cmake -DFALCOSECURITY_LIBS_REPO=<your-gh-handle>/libs ..` 
+  # ie., `cmake -DFALCOSECURITY_LIBS_REPO=<your-gh-handle>/libs ..`
   if (NOT FALCOSECURITY_LIBS_REPO)
     set(FALCOSECURITY_LIBS_REPO "falcosecurity/libs")
   endif()
 
   # FALCOSECURITY_LIBS_VERSION accepts a git reference (branch name, commit hash, or tag) to the falcosecurity/libs repository.
   # In case you want to test against another falcosecurity/libs version (or branch, or commit) just pass the variable -
-  # ie., `cmake -DFALCOSECURITY_LIBS_VERSION=dev ..` 
+  # ie., `cmake -DFALCOSECURITY_LIBS_VERSION=dev ..`
   if(NOT FALCOSECURITY_LIBS_VERSION)
-    set(FALCOSECURITY_LIBS_VERSION "00fa5c5196edf5858daf229ec8a96756d22fa854")
-    set(FALCOSECURITY_LIBS_CHECKSUM "SHA256=d7fd77830f97406828e7dd41bcd3178d54075c91638a8e40492d4e864457548a")
+    set(FALCOSECURITY_LIBS_VERSION "000d576ef877cb115cbb56f97187a1d62221e2bd")
+    set(FALCOSECURITY_LIBS_CHECKSUM "SHA256=4f078e3e448ba1d4ca2eff55a361a9a9d048f3a967fb4d91f0c91aa6fa22d5d2")
   endif()
 
   # cd /path/to/build && cmake /path/to/source
@@ -84,10 +84,10 @@ set(CREATE_TEST_TARGETS OFF CACHE BOOL "")
 set(BUILD_LIBSCAP_EXAMPLES OFF CACHE BOOL "")
 
 set(USE_BUNDLED_TBB ON CACHE BOOL "")
-set(USE_BUNDLED_B64 ON CACHE BOOL "")
 set(USE_BUNDLED_JSONCPP ON CACHE BOOL "")
 set(USE_BUNDLED_VALIJSON ON CACHE BOOL "")
 set(USE_BUNDLED_RE2 ON CACHE BOOL "")
+set(USE_BUNDLED_UTHASH ON CACHE BOOL "")
 
 list(APPEND CMAKE_MODULE_PATH "${FALCOSECURITY_LIBS_SOURCE_DIR}/cmake/modules")
 
@@ -95,12 +95,15 @@ include(CheckSymbolExists)
 check_symbol_exists(strlcpy "string.h" HAVE_STRLCPY)
 
 if(HAVE_STRLCPY)
-  message(STATUS "Existing strlcpy found, will *not* use local definition by setting -DHAVE_STRLCPY.")
+  message(STATUS "Existing strlcpy and strlcat found, will *not* use local definition by setting -DHAVE_STRLCPY and -DHAVE_STRLCAT.")
   add_definitions(-DHAVE_STRLCPY)
+  add_definitions(-DHAVE_STRLCAT)
 else()
-  message(STATUS "No strlcpy found, will use local definition")
+  message(STATUS "No strlcpy and strlcat found, will use local definition")
 endif()
 
-include(driver)
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+  include(driver)
+endif()
 include(libscap)
 include(libsinsp)

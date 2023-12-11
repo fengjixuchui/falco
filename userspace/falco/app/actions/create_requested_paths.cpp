@@ -18,14 +18,7 @@ limitations under the License.
 #include "actions.h"
 #include "falco_utils.h"
 #include <sys/stat.h>
-
-#ifndef CPPPATH_SEP
-#ifdef _MSC_VER
-#define CPPPATH_SEP "\\"
-#else
-#define CPPPATH_SEP "/"
-#endif
-#endif
+#include <filesystem>
 
 using namespace falco::app;
 using namespace falco::app::actions;
@@ -34,14 +27,14 @@ static int create_dir(const std::string &path);
 
 falco::app::run_result falco::app::actions::create_requested_paths(falco::app::state& s)
 {
-	if(s.is_gvisor_enabled())
+	if(s.is_gvisor())
 	{
 		// This is bad: parsing gvisor config to get endpoint
 		// to be able to auto-create the path to the file for the user.
-		std::ifstream reader(s.options.gvisor_config);
+		std::ifstream reader(s.config->m_gvisor.m_config);
 		if (reader.fail())
 		{
-			return run_result::fatal(s.options.gvisor_config + ": cannot open file");
+			return run_result::fatal(s.config->m_gvisor.m_config + ": cannot open file");
 		}
 
 		nlohmann::json parsed_json;
@@ -52,7 +45,7 @@ falco::app::run_result falco::app::actions::create_requested_paths(falco::app::s
 		}
 		catch (const std::exception &e)
 		{
-			return run_result::fatal(s.options.gvisor_config + ": cannot parse JSON: " + e.what());
+			return run_result::fatal(s.config->m_gvisor.m_config + ": cannot parse JSON: " + e.what());
 		}
 
 		try
@@ -61,7 +54,7 @@ falco::app::run_result falco::app::actions::create_requested_paths(falco::app::s
 		}
 		catch (const std::exception &e)
 		{
-			return run_result::fatal(s.options.gvisor_config + ": failed to fetch config.endpoint: " + e.what());
+			return run_result::fatal(s.config->m_gvisor.m_config + ": failed to fetch config.endpoint: " + e.what());
 		}
 
 		int ret = create_dir(gvisor_socket);
@@ -91,25 +84,19 @@ falco::app::run_result falco::app::actions::create_requested_paths(falco::app::s
 	return run_result::ok();
 }
 
+// This function operates like `mkdir -p` excluding the last part of
+// the path which we assume to be the filename.
 static int create_dir(const std::string &path)
 {
-	// Properly reset errno
-	errno = 0;
 
-	std::istringstream f(path);
-	std::string path_until_token;
-	std::string s;
-	// Create all the subfolder stopping at last token (f.eof());
-	// Examples:
-	// "/tmp/foo/bar" -> "", "tmp", "foo" -> mkdir("/") + mkdir("/tmp/") + midir("/tmp/foo/")
-	// "tmp/foo/bar" -> "tmp", "foo" -> mkdir("tmp/") + midir("tmp/foo/")
-	while (getline(f, s, *CPPPATH_SEP) && !f.eof()) {
-		path_until_token += s + CPPPATH_SEP;
-		int ret = mkdir(path_until_token.c_str(), 0600);
-		if (ret != 0 && errno != EEXIST)
-		{
-			return ret;
-		}
-	}
-	return 0;
+    std::filesystem::path dirPath(path);
+
+    try {
+        std::filesystem::create_directories(dirPath.parent_path());
+    } catch (const std::exception& ex) {
+		return -1;
+    }
+
+    return 0;
+
 }

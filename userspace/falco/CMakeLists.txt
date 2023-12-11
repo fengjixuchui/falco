@@ -26,7 +26,6 @@ set(
   app/actions/pidfile.cpp
   app/actions/init_falco_engine.cpp
   app/actions/init_inspectors.cpp
-  app/actions/init_clients.cpp
   app/actions/init_outputs.cpp
   app/actions/list_fields.cpp
   app/actions/list_plugins.cpp
@@ -37,6 +36,7 @@ set(
   app/actions/print_generated_gvisor_config.cpp
   app/actions/print_help.cpp
   app/actions/print_ignored_events.cpp
+  app/actions/print_kernel_version.cpp
   app/actions/print_plugin_info.cpp
   app/actions/print_support.cpp
   app/actions/print_syscall_events.cpp
@@ -53,9 +53,7 @@ set(
   logger.cpp
   falco_outputs.cpp
   outputs_file.cpp
-  outputs_program.cpp
   outputs_stdout.cpp
-  outputs_syslog.cpp
   event_drops.cpp
   stats_writer.cpp
   versions_info.cpp
@@ -88,6 +86,14 @@ set(
 
 if(USE_BUNDLED_DEPS)
   list(APPEND FALCO_DEPENDENCIES yamlcpp)
+endif()
+
+if(NOT WIN32)
+  list(
+    APPEND FALCO_SOURCES
+	outputs_program.cpp
+	outputs_syslog.cpp
+)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
@@ -214,12 +220,16 @@ if(MUSL_OPTIMIZED_BUILD AND CMAKE_BUILD_TYPE STREQUAL "release")
   )
 endif()
 
-if (NOT EMSCRIPTEN)
-  install(TARGETS falco RUNTIME DESTINATION ${FALCO_BIN_DIR} COMPONENT "${FALCO_COMPONENT_NAME}")
+if (EMSCRIPTEN)
+	install(FILES
+		"$<TARGET_FILE_DIR:falco>/falco.js"
+		"$<TARGET_FILE_DIR:falco>/falco.wasm"
+		DESTINATION ${FALCO_BIN_DIR}
+		COMPONENT "${FALCO_COMPONENT_NAME}")
+elseif (WIN32)
+	install(TARGETS falco
+		DESTINATION bin
+		COMPONENT "${FALCO_COMPONENT_NAME}")
 else()
-  install(FILES
-    "$<TARGET_FILE_DIR:falco>/falco.js"
-    "$<TARGET_FILE_DIR:falco>/falco.wasm"
-    DESTINATION ${FALCO_BIN_DIR}
-    COMPONENT "${FALCO_COMPONENT_NAME}")
+	install(TARGETS falco RUNTIME DESTINATION ${FALCO_BIN_DIR} COMPONENT "${FALCO_COMPONENT_NAME}")
 endif()

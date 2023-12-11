@@ -32,14 +32,11 @@ namespace app {
 // initialize their linked variables.
 options::options()
 	: event_buffer_format(sinsp_evt::PF_NORMAL),
-	  gvisor_config(""),	
 	  list_fields(false),
 	  list_plugins(false),
 	  list_syscall_events(false),
 	  markdown(false),
-	  modern_bpf(false),
-	  dry_run(false),
-	  nodriver(false)
+	  dry_run(false)
 {
 }
 
@@ -137,25 +134,13 @@ bool options::parse(int argc, char **argv, std::string &errstr)
 
 	// You can't both disable and enable rules
 	if((disabled_rule_substrings.size() + disabled_rule_tags.size() > 0) &&
-	   enabled_rule_tags.size() > 0)
+	   !enabled_rule_tags.empty())
 	{
 		errstr = std::string("You can not specify both disabled (-D/-T) and enabled (-t) rules");
 		return false;
 	}
 
-	list_fields = m_cmdline_parsed.count("list") > 0 ? true : false;
-
-	int open_modes = 0;
-	open_modes += !trace_filename.empty();
-	open_modes += !gvisor_config.empty();
-	open_modes += modern_bpf;
-	open_modes += getenv("FALCO_BPF_PROBE") != NULL;
-	open_modes += nodriver;
-	if (open_modes > 1)
-	{
-		errstr = std::string("You can not specify more than one of -e, -g (--gvisor-config), --modern-bpf, --nodriver, and the FALCO_BPF_PROBE env var");
-		return false;
-	}
+	list_fields = m_cmdline_parsed.count("list") > 0;
 
 	return true;
 }
@@ -183,22 +168,17 @@ void options::define(cxxopts::Options& opts)
 		("disable-source",                "Turn off a specific <event_source>. By default, all loaded sources get enabled. Available sources are 'syscall' plus all sources defined by loaded plugins supporting the event sourcing capability. This option can be passed multiple times, but turning off all event sources simultaneously is not permitted. This option can not be mixed with --enable-source. This option has no effect when reproducing events from a capture file.", cxxopts::value(disable_sources), "<event_source>")
 		("dry-run",                       "Run Falco without processing events. It can help check that the configuration and rules do not have any errors.", cxxopts::value(dry_run)->default_value("false"))
 		("D",                             "Turn off any rules with names having the substring <substring>. This option can be passed multiple times. It cannot be mixed with -t.", cxxopts::value(disabled_rule_substrings), "<substring>")
-		("e",                             "Reproduce the events by reading from the given <capture_file> instead of opening a live session. Only capture files in .scap format are supported.", cxxopts::value(trace_filename), "<events_file>")
+		("e",                             "DEPRECATED. Reproduce the events by reading from the given <capture_file> instead of opening a live session. Only capture files in .scap format are supported.", cxxopts::value(capture_file), "<events_file>")
 		("enable-source",                 "Enable a specific <event_source>. By default, all loaded sources get enabled. Available sources are 'syscall' plus all sources defined by loaded plugins supporting the event sourcing capability. This option can be passed multiple times. When using this option, only the event sources specified by it will be enabled. This option can not be mixed with --disable-source. This option has no effect when reproducing events from a capture file.", cxxopts::value(enable_sources), "<event_source>")
 #ifdef HAS_GVISOR
-		("g,gvisor-config",				  "Collect 'syscall' events from gVisor using the specified <gvisor_config> file. A Falco-compatible configuration file can be generated with --gvisor-generate-config and utilized for both runsc and Falco.", cxxopts::value(gvisor_config), "<gvisor_config>")
+		("g,gvisor-config",				  "DEPRECATED. Collect 'syscall' events from gVisor using the specified <gvisor_config> file. A Falco-compatible configuration file can be generated with --gvisor-generate-config and utilized for both runsc and Falco.", cxxopts::value(gvisor_config), "<gvisor_config>")
 		("gvisor-generate-config",		  "Generate a configuration file that can be used for gVisor and exit. See --gvisor-config for more details.", cxxopts::value<std::string>(gvisor_generate_config_with_socket)->implicit_value("/run/falco/gvisor.sock"), "<socket_path>")
-		("gvisor-root",					  "Set gVisor root directory for storage of container state when used in conjunction with --gvisor-config. The <gvisor_root> to be passed is the one usually passed to runsc --root flag.", cxxopts::value(gvisor_root), "<gvisor_root>")
+		("gvisor-root",					  "DEPRECATED. Set gVisor root directory for storage of container state when used in conjunction with --gvisor-config. The <gvisor_root> to be passed is the one usually passed to runsc --root flag.", cxxopts::value(gvisor_root), "<gvisor_root>")
 #endif
 #ifdef HAS_MODERN_BPF
-		("modern-bpf",				  "Use the BPF modern probe driver to instrument the kernel and observe 'syscall' events.", cxxopts::value(modern_bpf)->default_value("false"))
+		("modern-bpf",				  "DEPRECATED. Use the BPF modern probe driver to instrument the kernel and observe 'syscall' events.", cxxopts::value(modern_bpf)->default_value("false"))
 #endif
 		("i",                             "Print those events that are ignored by default for performance reasons and exit. See -A for more details.", cxxopts::value(print_ignored_events)->default_value("false"))
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
-		("k,k8s-api",                     "Enable Kubernetes metadata support by connecting to the given API server <URL>\n(e.g. \"http://admin:password@127.0.0.1:8080\". The API server can also be specified via the environment variable FALCO_K8S_API.", cxxopts::value(k8s_api), "<URL>")
-		("K,k8s-api-cert",                "Use the provided file names to authenticate the user and (optionally) verify the K8S API server identity. Each entry must specify the full (absolute or relative to the current directory) path to the respective file. Passing a private key password is optional (unless the key is password-protected). CA certificate is optional. For all files, only the PEM file format is supported. Specifying the CA certificate only is obsoleted - when a single entry is provided for this option, it will be interpreted as the name of a file containing the bearer token. Note that the format of this command-line option prohibits the use of files whose names contain ':' or '#' characters in the file name. This option has effect only when used in conjunction with -k.", cxxopts::value(k8s_api_cert), "(<bt_file> | <cert_file>:<key_file[#password]>[:<ca_cert_file>])")
-		("k8s-node",                      "Filter Kubernetes metadata for a specified <node_name>. The node name will be used as a filter when requesting metadata of pods to the API server. Usually, this should be set to the current node on which Falco is running. No filter is set if empty, which may have a performance penalty on large clusters. This option has effect only when used in conjunction with -k.", cxxopts::value(k8s_node_name), "<node_name>")
-#endif
 		("L",                             "Show the name and description of all rules and exit. If json_output is set to true, it prints details about all rules, macros, and lists in JSON format.", cxxopts::value(describe_all_rules)->default_value("false"))
 		("l",                             "Show the name and description of the rule specified <rule> and exit. If json_output is set to true, it prints details about the rule in JSON format.", cxxopts::value(describe_rule), "<rule>")
 		("list",                          "List all defined fields and exit. If <source> is provided, only list those fields for the source <source>. Current values for <source> are \"syscall\" or any source from a configured plugin with event sourcing capability.", cxxopts::value(list_source_fields)->implicit_value(""), "<source>")
@@ -207,7 +187,7 @@ void options::define(cxxopts::Options& opts)
 		("M",                             "Stop Falco execution after <num_seconds> are passed.", cxxopts::value(duration_to_tot)->default_value("0"), "<num_seconds>")
 		("markdown",                      "Print output in Markdown format when used in conjunction with --list or --list-events options. It has no effect when used with other options.", cxxopts::value<bool>(markdown))
 		("N",                             "Only print field names when used in conjunction with the --list option. It has no effect when used with other options.", cxxopts::value(names_only)->default_value("false"))
-		("nodriver",                      "Do not use a driver to instrument the kernel. If a loaded plugin has event-sourcing capability and can produce system events, it will be used for event collection. Otherwise, no event will be collected.", cxxopts::value(nodriver)->default_value("false"))
+		("nodriver",                      "DEPRECATED. Do not use a driver to instrument the kernel. If a loaded plugin has event-sourcing capability and can produce system events, it will be used for event collection. Otherwise, no event will be collected.", cxxopts::value(nodriver)->default_value("false"))
 		("o,option",                      "Set the value of option <opt> to <val>. Overrides values in the configuration file. <opt> can be identified using its location in the configuration file using dot notation. Elements of list entries can be accessed via square brackets [].\n    E.g. base.id = val\n         base.subvalue.subvalue2 = val\n         base.list[1]=val", cxxopts::value(cmdline_config_options), "<opt>=<val>")
 		("plugin-info",                   "Print info for the plugin specified by <plugin_name> and exit.\nThis includes all descriptive information like name and author, along with the\nschema format for the init configuration and a list of suggested open parameters.\n<plugin_name> can be the plugin's name or its configured 'library_path'.", cxxopts::value(print_plugin_info), "<plugin_name>")
 		("p,print",                       "Print (or replace) additional information in the rule's output.\nUse -pc or -pcontainer to append container details.\nUse -pk or -pkubernetes to add both container and Kubernetes details.\nIf using gVisor, choose -pcg or -pkg variants (or -pcontainer-gvisor and -pkubernetes-gvisor, respectively).\nIf a rule's output contains %container.info, it will be replaced with the corresponding details. Otherwise, these details will be directly appended to the rule's output.\nAlternatively, use -p <output_format> for a custom format. In this case, the given <output_format> will be appended to the rule's output without any replacement.", cxxopts::value(print_additional), "<output_format>")

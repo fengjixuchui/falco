@@ -16,7 +16,6 @@ set(FALCO_ENGINE_SOURCE_FILES
     falco_engine.cpp
     falco_load_result.cpp
     falco_utils.cpp
-    json_evt.cpp
     evttype_index_ruleset.cpp
     formats.cpp
     filter_details_resolver.cpp
@@ -36,8 +35,7 @@ endif()
 
 add_dependencies(falco_engine yamlcpp njson)
 
-if(MINIMAL_BUILD)
-  target_include_directories(
+target_include_directories(
     falco_engine
     PUBLIC
       "${NJSON_INCLUDE}"
@@ -46,16 +44,5 @@ if(MINIMAL_BUILD)
       "${LIBSINSP_INCLUDE_DIRS}"
       "${YAMLCPP_INCLUDE_DIR}"
       "${PROJECT_BINARY_DIR}/userspace/engine")
-else()
-  target_include_directories(
-    falco_engine
-    PUBLIC
-      "${NJSON_INCLUDE}"
-      "${TBB_INCLUDE_DIR}"
-      "${LIBSCAP_INCLUDE_DIRS}"
-      "${LIBSINSP_INCLUDE_DIRS}"
-      "${YAMLCPP_INCLUDE_DIR}"
-      "${PROJECT_BINARY_DIR}/userspace/engine")
-endif()
 
 target_link_libraries(falco_engine "${FALCO_SINSP_LIBRARY}" "${YAMLCPP_LIB}")

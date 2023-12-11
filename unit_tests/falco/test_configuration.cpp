@@ -18,6 +18,12 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <falco/configuration.h>
 
+#ifdef _WIN32
+#define SET_ENV_VAR(env_var_name, env_var_value) _putenv_s(env_var_name, env_var_value)
+#else
+#define SET_ENV_VAR(env_var_name, env_var_value) setenv(env_var_name, env_var_value, 1)
+#endif
+
 static std::string sample_yaml =
 	"base_value:\n"
 	"    id: 1\n"
@@ -109,7 +115,7 @@ TEST(Configuration, configuration_environment_variables)
     std::string env_var_value = "envVarValue";
     std::string env_var_name = "ENV_VAR";
     std::string default_value = "default";
-    setenv(env_var_name.c_str(), env_var_value.c_str(), 1);
+    SET_ENV_VAR(env_var_name.c_str(), env_var_value.c_str());
     yaml_helper conf;
 
     std::string sample_yaml =
@@ -172,5 +178,85 @@ TEST(Configuration, configuration_environment_variables)
     ASSERT_EQ(base_value_2_list_2, "$UNSED_XX_X_X_VAR"); // Does not follow the `${VAR}` format, so should be treated as a regular string
 
     /* Clear the set environment variable after testing */
-    unsetenv(env_var_name.c_str());
+    SET_ENV_VAR(env_var_name.c_str(), env_var_value.c_str());
+}
+
+TEST(Configuration, configuration_webserver_ip)
+{
+    falco_configuration falco_config;
+
+    std::vector<std::string> valid_addresses = {"127.0.0.1",
+                                                "1.127.0.1",
+                                                "1.1.127.1",
+                                                "1.1.1.127",
+                                                "::",
+                                                "::1",
+                                                "1200:0000:AB00:1234:0000:2552:7777:1313",
+                                                "1200::AB00:1234:0000:2552:7777:1313",
+                                                "1200:0000:AB00:1234::2552:7777:1313",
+                                                "21DA:D3:0:2F3B:2AA:FF:FE28:9C5A",
+                                                "FE80:0000:0000:0000:0202:B3FF:FE1E:8329",
+                                                "0.0.0.0",
+                                                "9.255.255.255",
+                                                "11.0.0.0",
+                                                "126.255.255.255",
+                                                "129.0.0.0",
+                                                "169.253.255.255",
+                                                "169.255.0.0",
+                                                "172.15.255.255",
+                                                "172.32.0.0",
+                                                "191.0.1.255",
+                                                "192.88.98.255",
+                                                "192.88.100.0",
+                                                "192.167.255.255",
+                                                "192.169.0.0",
+                                                "198.17.255.255",
+                                                "223.255.255.255"};
+
+    for (const std::string &address: valid_addresses) {
+        std::string option = "webserver.listen_address=";
+        option.append(address);
+
+        std::vector<std::string> cmdline_config_options;
+        cmdline_config_options.push_back(option);
+
+        EXPECT_NO_THROW(falco_config.init(cmdline_config_options));
+
+        ASSERT_EQ(falco_config.m_webserver_listen_address, address);
+    }
+
+    std::vector<std::string> invalid_addresses = {"327.0.0.1",
+                                                  "1.327.0.1",
+                                                  "1.1.327.1",
+                                                  "1.1.1.327",
+                                                  "12 7.0.0.1",
+                                                  "127. 0.0.1",
+                                                  "127.0. 0.1",
+                                                  "127.0.0. 1",
+                                                  "!27.0.0.1",
+                                                  "1200: 0000:AB00:1234:0000:2552:7777:1313",
+                                                  "1200:0000: AB00:1234:0000:2552:7777:1313",
+                                                  "1200:0000:AB00: 1234:0000:2552:7777:1313",
+                                                  "1200:0000:AB00:1234: 0000:2552:7777:1313",
+                                                  "1200:0000:AB00:1234:0000: 2552:7777:1313",
+                                                  "1200:0000:AB00:1234:0000:2552: 7777:1313",
+                                                  "1200:0000:AB00:1234:0000:2552:7777: 1313",
+                                                  "1200:0000:AB00:1234:0000:2552:7777:131G",
+                                                  "1200:0000:AB00:1234:0000:2552:77Z7:1313",
+                                                  "1200:0000:AB00:1234:0000:2G52:7777:1313",
+                                                  "1200:0000:AB00:1234:0O00:2552:7777:1313",
+                                                  "1200:0000:AB00:H234:0000:2552:7777:1313",
+                                                  "1200:0000:IB00:1234:0000:2552:7777:1313",
+                                                  "1200:0O00:AB00:1234:0000:2552:7777:1313",
+                                                  "12O0:0000:AB00:1234:0000:2552:7777:1313",};
+
+    for (const std::string &address: invalid_addresses) {
+        std::string option = "webserver.listen_address=";
+        option.append(address);
+
+        std::vector<std::string> cmdline_config_options;
+        cmdline_config_options.push_back(option);
+
+        EXPECT_ANY_THROW(falco_config.init(cmdline_config_options));
+    }
 }

@@ -18,11 +18,25 @@ limitations under the License.
 #pragma once
 
 #include "sinsp.h"
+#ifndef _WIN32
 #include <syslog.h>
+#endif
 
 class falco_logger
 {
  public:
+
+	 enum class level : int
+	{
+		EMERG = 0,
+		ALERT,
+		CRIT,
+		ERR,
+		WARNING,
+		NOTICE,
+		INFO,
+		DEBUG
+	};
 
 	static void set_time_format_iso_8601(bool val);
 
@@ -31,9 +45,9 @@ class falco_logger
 
 	static void set_sinsp_logging(bool enable, const std::string& severity, const std::string& prefix);
 
-	static void log(int priority, const std::string&& msg);
+	static void log(falco_logger::level priority, const std::string&& msg);
 
-	static int level;
+	static level current_level;
 	static bool log_stderr;
 	static bool log_syslog;
 	static bool time_format_iso_8601;

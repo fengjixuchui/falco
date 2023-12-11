@@ -62,6 +62,7 @@ bool falco::app::run(falco::app::state& s, bool& restart, std::string& errstr)
 	std::list<app_action> run_steps = {
 		falco::app::actions::load_config,
 		falco::app::actions::print_help,
+		falco::app::actions::print_kernel_version,
 		falco::app::actions::print_version,
 		falco::app::actions::print_page_size,
 		falco::app::actions::print_generated_gvisor_config,
@@ -82,7 +83,6 @@ bool falco::app::run(falco::app::state& s, bool& restart, std::string& errstr)
 		falco::app::actions::create_signal_handlers,
 		falco::app::actions::create_requested_paths,
 		falco::app::actions::pidfile,
-		falco::app::actions::init_clients,
 		falco::app::actions::configure_interesting_sets,
 		falco::app::actions::configure_syscall_buffer_size,
 		falco::app::actions::configure_syscall_buffer_num,

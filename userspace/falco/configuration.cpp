@@ -22,14 +22,23 @@ limitations under the License.
 #include <string>
 #include <unordered_set>
 
-#include <dirent.h>
+#include <filesystem>
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include "falco_utils.h"
 
 #include "configuration.h"
 #include "logger.h"
+
+#include <re2/re2.h>
+
+namespace fs = std::filesystem;
+
+// Reference: https://digitalfortress.tech/tips/top-15-commonly-used-regex/
+static re2::RE2 ip_address_re("((^\\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))\\s*$)|(^\\s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:)))(%.+)?\\s*$))");
 
 falco_configuration::falco_configuration():
 	m_json_output(false),
@@ -46,6 +55,7 @@ falco_configuration::falco_configuration():
 	m_webserver_enabled(false),
 	m_webserver_threadiness(0),
 	m_webserver_listen_port(8765),
+	m_webserver_listen_address("0.0.0.0"),
 	m_webserver_k8s_healthz_endpoint("/healthz"),
 	m_webserver_ssl_enabled(false),
 	m_syscall_evt_drop_threshold(.1),
@@ -53,25 +63,16 @@ falco_configuration::falco_configuration():
 	m_syscall_evt_drop_max_burst(1),
 	m_syscall_evt_simulate_drops(false),
 	m_syscall_evt_timeout_max_consecutives(1000),
-	m_metadata_download_max_mb(100),
-	m_metadata_download_chunk_wait_us(1000),
-	m_metadata_download_watch_freq_sec(1),
-	m_syscall_buf_size_preset(4),
-	m_cpus_for_each_syscall_buffer(2),
-	m_syscall_drop_failed_exit(false),
 	m_base_syscalls_repair(false),
 	m_metrics_enabled(false),
 	m_metrics_interval_str("5000"),
 	m_metrics_interval(5000),
 	m_metrics_stats_rule_enabled(false),
 	m_metrics_output_file(""),
-	m_metrics_resource_utilization_enabled(true),
-	m_metrics_kernel_event_counters_enabled(true),
-	m_metrics_libbpf_stats_enabled(true),
+	m_metrics_flags((PPM_SCAP_STATS_KERNEL_COUNTERS | PPM_SCAP_STATS_LIBBPF_STATS | PPM_SCAP_STATS_RESOURCE_UTILIZATION | PPM_SCAP_STATS_STATE_COUNTERS)),
 	m_metrics_convert_memory_to_mb(true),
 	m_metrics_include_empty_values(false)
 {
-	init({});
 }
 
 void falco_configuration::init(const std::vector<std::string>& cmdline_options)
@@ -99,8 +100,94 @@ void falco_configuration::init(const std::string& conf_filename, const std::vect
 	load_yaml(conf_filename, config);
 }
 
+void falco_configuration::load_engine_config(const std::string& config_name, const yaml_helper& config)
+{
+	// Set driver mode if not already set.
+	const std::unordered_map<std::string, engine_kind_t> engine_mode_lut = {
+		{"kmod",engine_kind_t::KMOD},
+		{"ebpf",engine_kind_t::EBPF},
+		{"modern_ebpf",engine_kind_t::MODERN_EBPF},
+		{"replay",engine_kind_t::REPLAY},
+		{"gvisor",engine_kind_t::GVISOR},
+		{"none",engine_kind_t::NONE},
+	};
+
+	auto driver_mode_str = config.get_scalar<std::string>("engine.kind", "kmod");
+	if (engine_mode_lut.find(driver_mode_str) != engine_mode_lut.end())
+	{
+		m_engine_mode = engine_mode_lut.at(driver_mode_str);
+	}
+	else
+	{
+		throw std::logic_error("Error reading config file (" + config_name + "): engine.kind '"+ driver_mode_str + "' is not a valid kind.");
+	}
+
+	// Catch deprecated values from the config, to use them with the command line if needed
+	m_syscall_buf_size_preset = config.get_scalar<int16_t>("syscall_buf_size_preset", DEFAULT_BUF_SIZE_PRESET);
+	m_cpus_for_each_syscall_buffer = config.get_scalar<uint16_t>("modern_bpf.cpus_for_each_syscall_buffer", DEFAULT_CPUS_FOR_EACH_SYSCALL_BUFFER);
+	m_syscall_drop_failed_exit = config.get_scalar<bool>("syscall_drop_failed_exit", DEFAULT_DROP_FAILED_EXIT);
+
+	switch (m_engine_mode)
+	{
+	case engine_kind_t::KMOD:
+		m_kmod.m_buf_size_preset = config.get_scalar<int16_t>("engine.kmod.buf_size_preset", DEFAULT_BUF_SIZE_PRESET);
+		m_kmod.m_drop_failed_exit = config.get_scalar<bool>("engine.kmod.drop_failed_exit", DEFAULT_DROP_FAILED_EXIT);
+
+		if(m_kmod.m_buf_size_preset == DEFAULT_BUF_SIZE_PRESET && m_kmod.m_drop_failed_exit==DEFAULT_DROP_FAILED_EXIT)
+		{
+			// This could happen in 2 cases:
+			// 1. The user doesn't use the new config (it could also have commented it)
+			// 2. The user uses the new config unchanged.
+			// In these 2 cases the users are allowed to use the command line arguments to open an engine
+			m_changes_in_engine_config = false;
+			return;
+		}
+
+		break;
+	case engine_kind_t::EBPF:
+		// TODO: default value for `probe` should be $HOME/FALCO_PROBE_BPF_FILEPATH,
+		// to be done once we drop the CLI option otherwise we would need to make the check twice,
+		// once here, and once when we merge the CLI options in the config file.
+		m_ebpf.m_probe_path = config.get_scalar<std::string>("engine.ebpf.probe", "");
+		m_ebpf.m_buf_size_preset = config.get_scalar<int16_t>("engine.ebpf.buf_size_preset", DEFAULT_BUF_SIZE_PRESET);
+		m_ebpf.m_drop_failed_exit = config.get_scalar<bool>("engine.ebpf.drop_failed_exit", DEFAULT_DROP_FAILED_EXIT);
+		break;
+	case engine_kind_t::MODERN_EBPF:
+		m_modern_ebpf.m_cpus_for_each_buffer = config.get_scalar<uint16_t>("engine.modern_ebpf.cpus_for_each_buffer", DEFAULT_CPUS_FOR_EACH_SYSCALL_BUFFER);
+		m_modern_ebpf.m_buf_size_preset = config.get_scalar<int16_t>("engine.modern_ebpf.buf_size_preset", DEFAULT_BUF_SIZE_PRESET);
+		m_modern_ebpf.m_drop_failed_exit = config.get_scalar<bool>("engine.modern_ebpf.drop_failed_exit", DEFAULT_DROP_FAILED_EXIT);
+		break;
+	case engine_kind_t::REPLAY:
+		m_replay.m_capture_file = config.get_scalar<std::string>("engine.replay.capture_file", "");
+		if (m_replay.m_capture_file.empty())
+		{
+			throw std::logic_error("Error reading config file (" + config_name + "): engine.kind is 'replay' but no engine.replay.capture_file specified.");
+		}
+		break;
+	case engine_kind_t::GVISOR:
+		m_gvisor.m_config = config.get_scalar<std::string>("engine.gvisor.config", "");
+		if (m_gvisor.m_config.empty())
+		{
+			throw std::logic_error("Error reading config file (" + config_name + "): engine.kind is 'gvisor' but no engine.gvisor.config specified.");
+		}
+		m_gvisor.m_root = config.get_scalar<std::string>("engine.gvisor.root", "");
+		break;
+	case engine_kind_t::NONE:
+	default:
+		break;
+	}
+	
+	// If we arrive here it means we have at least one change in the `engine` config.
+	// Please note that `load_config` could be called more than one time during initialization
+	// so the last time wins, the load config phase should be idempotent
+	m_changes_in_engine_config = true;
+}
+
 void falco_configuration::load_yaml(const std::string& config_name, const yaml_helper& config)
 {
+	load_engine_config(config_name, config);
+	m_log_level = config.get_scalar<std::string>("log_level", "info");
+
 	std::list<std::string> rules_files;
 
 	config.get_sequence<std::list<std::string>>(rules_files, std::string("rules_file"));
@@ -285,6 +372,12 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 	m_webserver_enabled = config.get_scalar<bool>("webserver.enabled", false);
 	m_webserver_threadiness = config.get_scalar<uint32_t>("webserver.threadiness", 0);
 	m_webserver_listen_port = config.get_scalar<uint32_t>("webserver.listen_port", 8765);
+	m_webserver_listen_address = config.get_scalar<std::string>("webserver.listen_address", "0.0.0.0");
+	if(!re2::RE2::FullMatch(m_webserver_listen_address, ip_address_re))
+	{
+		throw std::logic_error("Error reading config file (" + config_name + "): webserver listen address \"" + m_webserver_listen_address + "\" is not a valid IP address");
+	}
+
 	m_webserver_k8s_healthz_endpoint = config.get_scalar<std::string>("webserver.k8s_healthz_endpoint", "/healthz");
 	m_webserver_ssl_enabled = config.get_scalar<bool>("webserver.ssl_enabled", false);
 	m_webserver_ssl_certificate = config.get_scalar<std::string>("webserver.ssl_certificate", "/etc/falco/falco.pem");
@@ -301,11 +394,11 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 	{
 		if(act == "ignore")
 		{
-			m_syscall_evt_drop_actions.insert(syscall_evt_drop_action::IGNORE);
+			m_syscall_evt_drop_actions.insert(syscall_evt_drop_action::DISREGARD);
 		}
 		else if(act == "log")
 		{
-			if(m_syscall_evt_drop_actions.count(syscall_evt_drop_action::IGNORE))
+			if(m_syscall_evt_drop_actions.count(syscall_evt_drop_action::DISREGARD))
 			{
 				throw std::logic_error("Error reading config file (" + config_name + "): syscall event drop action \"" + act + "\" does not make sense with the \"ignore\" action");
 			}
@@ -313,7 +406,7 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 		}
 		else if(act == "alert")
 		{
-			if(m_syscall_evt_drop_actions.count(syscall_evt_drop_action::IGNORE))
+			if(m_syscall_evt_drop_actions.count(syscall_evt_drop_action::DISREGARD))
 			{
 				throw std::logic_error("Error reading config file (" + config_name + "): syscall event drop action \"" + act + "\" does not make sense with the \"ignore\" action");
 			}
@@ -331,7 +424,7 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 
 	if(m_syscall_evt_drop_actions.empty())
 	{
-		m_syscall_evt_drop_actions.insert(syscall_evt_drop_action::IGNORE);
+		m_syscall_evt_drop_actions.insert(syscall_evt_drop_action::DISREGARD);
 	}
 
 	m_syscall_evt_drop_threshold = config.get_scalar<double>("syscall_event_drops.threshold", .1);
@@ -349,27 +442,6 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 		throw std::logic_error("Error reading config file(" + config_name + "): the maximum consecutive timeouts without an event must be an unsigned integer > 0");
 	}
 
-	m_metadata_download_max_mb = config.get_scalar<uint32_t>("metadata_download.max_mb", 100);
-	if(m_metadata_download_max_mb > 1024)
-	{
-		throw std::logic_error("Error reading config file(" + config_name + "): metadata download maximum size should be < 1024 Mb");
-	}
-	m_metadata_download_chunk_wait_us = config.get_scalar<uint32_t>("metadata_download.chunk_wait_us", 1000);
-	m_metadata_download_watch_freq_sec = config.get_scalar<uint32_t>("metadata_download.watch_freq_sec", 1);
-	if(m_metadata_download_watch_freq_sec == 0)
-	{
-		throw std::logic_error("Error reading config file(" + config_name + "): metadata download watch frequency seconds must be an unsigned integer > 0");
-	}
-
-	/* We put this value in the configuration file because in this way we can change the dimension at every reload.
-	 * The default value is `4` -> 8 MB.
-	 */
-	m_syscall_buf_size_preset = config.get_scalar<uint16_t>("syscall_buf_size_preset", 4);
-
-	m_cpus_for_each_syscall_buffer = config.get_scalar<uint16_t>("modern_bpf.cpus_for_each_syscall_buffer", 2);
-
-	m_syscall_drop_failed_exit = config.get_scalar<bool>("syscall_drop_failed_exit", false);
-
 	m_base_syscalls_custom_set.clear();
 	config.get_sequence<std::unordered_set<std::string>>(m_base_syscalls_custom_set, std::string("base_syscalls.custom_set"));
 	m_base_syscalls_repair = config.get_scalar<bool>("base_syscalls.repair", false);
@@ -379,16 +451,35 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 	m_metrics_interval = falco::utils::parse_prometheus_interval(m_metrics_interval_str);
 	m_metrics_stats_rule_enabled = config.get_scalar<bool>("metrics.output_rule", false);
 	m_metrics_output_file = config.get_scalar<std::string>("metrics.output_file", "");
-	m_metrics_resource_utilization_enabled = config.get_scalar<bool>("metrics.resource_utilization_enabled", true);
-	m_metrics_kernel_event_counters_enabled = config.get_scalar<bool>("metrics.kernel_event_counters_enabled", true);
-	m_metrics_libbpf_stats_enabled = config.get_scalar<bool>("metrics.libbpf_stats_enabled", true);
+
+	m_metrics_flags = 0;
+	if (config.get_scalar<bool>("metrics.resource_utilization_enabled", true))
+	{
+		m_metrics_flags |= PPM_SCAP_STATS_RESOURCE_UTILIZATION;
+
+	}
+	if (config.get_scalar<bool>("metrics.state_counters_enabled", true))
+	{
+		m_metrics_flags |= PPM_SCAP_STATS_STATE_COUNTERS;
+
+	}
+	if (config.get_scalar<bool>("metrics.kernel_event_counters_enabled", true))
+	{
+		m_metrics_flags |= PPM_SCAP_STATS_KERNEL_COUNTERS;
+
+	}
+	if (config.get_scalar<bool>("metrics.libbpf_stats_enabled", true))
+	{
+		m_metrics_flags |= PPM_SCAP_STATS_LIBBPF_STATS;
+
+	}
+
 	m_metrics_convert_memory_to_mb = config.get_scalar<bool>("metrics.convert_memory_to_mb", true);
 	m_metrics_include_empty_values = config.get_scalar<bool>("metrics.include_empty_values", false);
 
 	std::vector<std::string> load_plugins;
 
 	bool load_plugins_node_defined = config.is_defined("load_plugins");
-
 	config.get_sequence<std::vector<std::string>>(load_plugins, "load_plugins");
 
 	std::list<falco_configuration::plugin_config> plugins;
@@ -441,17 +532,9 @@ void falco_configuration::load_yaml(const std::string& config_name, const yaml_h
 
 void falco_configuration::read_rules_file_directory(const std::string &path, std::list<std::string> &rules_filenames, std::list<std::string> &rules_folders)
 {
-	struct stat st;
+	fs::path rules_path = std::string(path);
 
-	int rc = stat(path.c_str(), &st);
-
-	if(rc != 0)
-	{
-		std::cerr << "Could not get info on rules file " << path << ": " << strerror(errno) << std::endl;
-		exit(-1);
-	}
-
-	if(st.st_mode & S_IFDIR)
+	if(fs::is_directory(rules_path))
 	{
 		rules_folders.push_back(path);
 
@@ -460,33 +543,16 @@ void falco_configuration::read_rules_file_directory(const std::string &path, std
 		// rules_filenames
 		std::vector<std::string> dir_filenames;
 
-		DIR *dir = opendir(path.c_str());
+		const auto it_options = fs::directory_options::follow_directory_symlink
+											| fs::directory_options::follow_directory_symlink;
 
-		if(!dir)
+		for (auto const& dir_entry : fs::directory_iterator(rules_path, it_options))
 		{
-			std::cerr << "Could not get read contents of directory " << path << ": " << strerror(errno) << std::endl;
-			exit(-1);
-		}
-
-		for(struct dirent *ent = readdir(dir); ent; ent = readdir(dir))
-		{
-			std::string efile = path + "/" + ent->d_name;
-
-			rc = stat(efile.c_str(), &st);
-
-			if(rc != 0)
+			if(std::filesystem::is_regular_file(dir_entry.path()))
 			{
-				std::cerr << "Could not get info on rules file " << efile << ": " << strerror(errno) << std::endl;
-				exit(-1);
-			}
-
-			if(st.st_mode & S_IFREG)
-			{
-				dir_filenames.push_back(efile);
+				dir_filenames.push_back(dir_entry.path().string());
 			}
 		}
-
-		closedir(dir);
 
 		std::sort(dir_filenames.begin(),
 			  dir_filenames.end());

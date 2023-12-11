@@ -27,6 +27,8 @@
 #     (Falco environment variables)
 # Falco rules files
 #     rules_file
+# Falco engine
+#     engine
 # Falco plugins
 #     load_plugins
 #     plugins
@@ -63,13 +65,10 @@
 #     syscall_event_drops
 #     metrics
 # Falco performance tuning (advanced)
-#     syscall_buf_size_preset
-#     syscall_drop_failed_exit
+#     syscall_buf_size_preset [DEPRECATED]
+#     syscall_drop_failed_exit [DEPRECATED]
 #     base_syscalls
-#     modern_bpf.cpus_for_each_syscall_buffer
-# Falco cloud orchestration systems integration
-#     metadata_download
-#     (Guidance for Kubernetes container engine command-line args settings)
+#     modern_bpf.cpus_for_each_syscall_buffer [DEPRECATED]
 
 
 ################################
@@ -97,7 +96,7 @@
 # - "HOST_ROOT": Specifies the prefix to the underlying host `/proc` filesystem
 #   when deploying Falco over a container with read-only host mounts instead of
 #   directly on the host. Defaults to "/host". 
-# - "FALCO_BPF_PROBE": Specify a custom path to the BPF object code file (`bpf`
+# - "FALCO_BPF_PROBE": DEPRECATED. Specify a custom path to the BPF object code file (`bpf`
 #   driver). This is not needed for the modern_bpf driver. 
 # - "FALCO_HOSTNAME": Customize the hostname output field logged by Falco by
 #   setting the "FALCO_HOSTNAME" environment variable.
@@ -148,6 +147,196 @@ rules_file:
   - /etc/falco/falco_rules.local.yaml
   - /etc/falco/rules.d
 
+################
+# Falco engine #
+################
+
+# [Stable] `engine`
+#
+# --- [Description]
+#
+# Falco supports different engines to generate events.
+# Choose the appropriate engine kind based on your system's configuration and requirements.
+#
+# Available engines:
+# - `kmod`: Kernel Module (Kernel Module)
+# - `ebpf`: eBPF (eBPF probe)
+# - `modern_ebpf`: Modern eBPF (CO-RE eBPF probe)
+# - `gvisor`: gVisor (gVisor sandbox)
+# - `replay`: Replay a scap trace file
+# - `none`: No event producer loaded, useful to run with plugins.
+#
+# Only one engine can be specified in the `kind` key.
+# Moreover, for each engine multiple options might be available,
+# grouped under engine-specific configuration keys.
+# Some of them deserve an in-depth description:
+#
+################### `buf_size_preset`
+#
+# --- [Description]
+#
+# The syscall buffer index determines the size of the shared space between Falco
+# and its drivers. This shared space serves as a temporary storage for syscall
+# events, allowing them to be transferred from the kernel to the userspace
+# efficiently. The buffer size for each online CPU is determined by the buffer
+# index, and each CPU has its own dedicated buffer. Adjusting this index allows
+# you to control the overall size of the syscall buffers.
+#
+# --- [Usage]
+#
+# The index 0 is reserved, and each subsequent index corresponds to an
+# increasing size in bytes. For example, index 1 corresponds to a size of 1 MB,
+# index 2 corresponds to 2 MB, and so on:
+#
+# [(*), 1 MB, 2 MB, 4 MB, 8 MB, 16 MB, 32 MB, 64 MB, 128 MB, 256 MB, 512 MB]
+#   ^    ^     ^     ^     ^     ^      ^      ^       ^       ^       ^
+#   |    |     |     |     |     |      |      |       |       |       |
+#   0    1     2     3     4     5      6      7       8       9       10
+#
+#
+# The buffer dimensions in bytes are determined by the following requirements:
+# (1) a power of 2.
+# (2) a multiple of your system_page_dimension.
+# (3) greater than `2 * (system_page_dimension).
+#
+# The buffer size constraints may limit the usability of certain indexes. Let's
+# consider an example to illustrate this:
+#
+# If your system has a page size of 1 MB, the first available buffer size would
+# be 4 MB because 2 MB is exactly equal to 2 * (system_page_size), which is not
+# sufficient as we require more than 2 * (system_page_size). In this example, it
+# is evident that if the page size is 1 MB, the first index that can be used is 3.
+#
+# However, in most cases, these constraints do not pose a limitation, and all
+# indexes from 1 to 10 can be used. You can check your system's page size using
+# the Falco `--page-size` command-line option.
+# 
+# --- [Suggestions]
+#
+# The buffer size was previously fixed at 8 MB (index 4). You now have the
+# option to adjust the size based on your needs. Increasing the size, such as to
+# 16 MB (index 5), can reduce syscall drops in heavy production systems, but may
+# impact performance. Decreasing the size can speed up the system but may
+# increase syscall drops. It's important to note that the buffer size is mapped
+# twice in the process' virtual memory, so a buffer of 8 MB will result in a 16
+# MB area in virtual memory. Use this parameter with caution and only modify it
+# if the default size is not suitable for your use case.
+#
+################### `drop_failed_exit`
+#
+# --- [Description]
+#
+# Enabling this option in Falco allows it to drop failed system call exit events
+# in the kernel drivers before pushing them onto the ring buffer. This
+# optimization can result in lower CPU usage and more efficient utilization of
+# the ring buffer, potentially reducing the number of event losses. However, it
+# is important to note that enabling this option also means sacrificing some
+# visibility into the system.
+#
+################### `cpus_for_each_buffer` (modern_ebpf only)
+#
+# --- [Description]
+#
+# The modern_bpf driver in Falco utilizes the new BPF ring buffer, which has a
+# different memory footprint compared to the current BPF driver that uses the
+# perf buffer. The Falco core maintainers have discussed the differences and
+# their implications, particularly in Kubernetes environments where limits need
+# to be carefully set to avoid interference with the Falco daemonset deployment
+# from the OOM killer. Based on guidance received from the kernel mailing list,
+# it is recommended to assign multiple CPUs to one buffer instead of allocating
+# a buffer for each CPU individually. This helps optimize resource allocation
+# and prevent potential issues related to memory usage.
+#
+# This is an index that controls how many CPUs you want to assign to a single
+# syscall buffer (ring buffer). By default, for modern_bpf every syscall buffer
+# is associated to 2 CPUs, so the mapping is 1:2. The modern BPF probe allows
+# you to choose different mappings, for example, changing the value to `1`
+# results in a 1:1 mapping and would mean one syscall buffer for each CPU (this
+# is the default for the `bpf` driver).
+#
+# --- [Usage]
+#
+# You can choose an index from 0 to MAX_NUMBER_ONLINE_CPUs to set the dimension
+# of the syscall buffers. The value 0 represents a single buffer shared among
+# all online CPUs. It serves as a flexible option when the exact number of
+# online CPUs is unknown. Here's an example to illustrate this:
+#
+# Consider a system with 7 online CPUs:
+#
+#          CPUs     0  X  2  3  X  X  6  7  8  9   (X means offline CPU)
+#
+# - `1` means a syscall buffer for each CPU so 7 buffers
+#
+#          CPUs     0  X  2  3  X  X  6  7  8  9   (X means offline CPU)
+#                   |     |  |        |  |  |  |
+#       BUFFERs     0     1  2        3  4  5  6
+#
+# - `2` (Default value) means a syscall buffer for each CPU pair, so 4 buffers
+#
+#          CPUs     0  X  2  3  X  X  6  7  8  9   (X means offline CPU)
+#                   |     |  |        |  |  |  |
+#       BUFFERs     0     0  1        1  2  2  3
+#
+# Please note that in this example, there are 4 buffers in total. Three of the
+# buffers are associated with pairs of CPUs, while the last buffer is mapped to
+# a single CPU. This arrangement is necessary because we have an odd number of
+# CPUs.
+#
+# - `0` or `MAX_NUMBER_ONLINE_CPUs` mean a syscall buffer shared between all
+#   CPUs, so 1 buffer
+#
+#          CPUs     0  X  2  3  X  X  6  7  8  9   (X means offline CPU)
+#                   |     |  |        |  |  |  |
+#       BUFFERs     0     0  0        0  0  0  0
+#
+# Moreover, you have the option to combine this parameter with
+# `buf_size_preset` index. For instance, you can create a large shared
+# syscall buffer of 512 MB (using buf_size_preset=10) that is
+# allocated among all the online CPUs.
+#
+# --- [Suggestions]
+#
+# The default choice of index 2 (one syscall buffer for each CPU pair) was made
+# because the modern bpf probe utilizes a different memory allocation strategy
+# compared to the other two drivers (bpf and kernel module). However, you have
+# the flexibility to experiment and find the optimal configuration for your
+# system.
+# 
+# When considering a fixed buf_size_preset and a fixed buffer dimension:
+# - Increasing this configs value results in lower number of buffers and you can
+#   speed up your system and reduce memory usage
+# - However, using too few buffers may increase contention in the kernel,
+#   leading to a slowdown.
+# 
+# If you have low event throughputs and minimal drops, reducing the number of
+# buffers (higher `cpus_for_each_buffer`) can lower the memory footprint.
+#
+engine:
+  kind: kmod
+  kmod:
+    buf_size_preset: 4
+    drop_failed_exit: false
+  ebpf:
+    # path to the elf file to load.
+    probe: /root/.falco/falco-bpf.o
+    buf_size_preset: 4
+    drop_failed_exit: false
+  modern_ebpf:
+    cpus_for_each_buffer: 2
+    buf_size_preset: 4
+    drop_failed_exit: false
+  replay:
+    # path to the capture file to replay (eg: /path/to/file.scap)
+    capture_file: ""
+  gvisor:
+    # A Falco-compatible configuration file can be generated with
+    # '--gvisor-generate-config' and utilized for both runsc and Falco.
+    config: ""
+    # Set gVisor root directory for storage of container state when used
+    # in conjunction with 'gvisor.config'. The 'gvisor.root' to be passed
+    # is the one usually passed to 'runsc --root' flag.
+    root: ""
+
 #################
 # Falco plugins #
 #################
@@ -170,11 +359,10 @@ rules_file:
 #
 # Please note that if your intention is to enrich Falco syscall logs with fields
 # such as `k8s.ns.name`, `k8s.pod.name`, and `k8s.pod.*`, you do not need to use
-# the `k8saudit` plugin nor the `-k`/`-K` Kubernetes metadata enrichment. This
-# information is automatically extracted from the container runtime socket. The
-# `k8saudit` plugin is specifically designed to integrate with Kubernetes audit
-# logs and is not required for basic enrichment of syscall logs with
-# Kubernetes-related fields.
+# the `k8saudit` plugin. This information is automatically extracted from
+# the container runtime socket. The `k8saudit` plugin is specifically designed
+# to integrate with Kubernetes audit logs and is not required for basic enrichment
+# of syscall logs with Kubernetes-related fields.
 #
 # --- [Usage]
 #
@@ -492,6 +680,8 @@ webserver:
   # the appropriate number of threads based on the number of online cores in the system.
   threadiness: 0
   listen_port: 8765
+  # Can be an IPV4 or IPV6 address, defaults to IPV4
+  listen_address: 0.0.0.0
   k8s_healthz_endpoint: /healthz
   ssl_enabled: false
   ssl_certificate: /etc/falco/falco.pem
@@ -727,13 +917,22 @@ syscall_event_drops:
 # number of CPUs to determine overall usage. Memory metrics are provided in raw
 # units (`kb` for `RSS`, `PSS` and `VSZ` or `bytes` for `container_memory_used`)
 # and can be uniformly converted to megabytes (MB) using the
-# `convert_memory_to_mb` functionality. In environments such as Kubernetes, it
-# is crucial to track Falco's container memory usage. To customize the path of
-# the memory metric file, you can create an environment variable named
-# `FALCO_CGROUP_MEM_PATH` and set it to the desired file path. By default, Falco
-# uses the file `/sys/fs/cgroup/memory/memory.usage_in_bytes` to monitor
-# container memory usage, which aligns with Kubernetes'
-# `container_memory_working_set_bytes` metric.
+# `convert_memory_to_mb` functionality. In environments such as Kubernetes when 
+# deployed as daemonset, it is crucial to track Falco's container memory usage. 
+# To customize the path of the memory metric file, you can create an environment 
+# variable named `FALCO_CGROUP_MEM_PATH` and set it to the desired file path. By 
+# default, Falco uses the file `/sys/fs/cgroup/memory/memory.usage_in_bytes` to 
+# monitor container memory usage, which aligns with Kubernetes' 
+# `container_memory_working_set_bytes` metric. Finally, we emit the overall host 
+# CPU and memory usages, along with the total number of processes and open file 
+# descriptors (fds) on the host, obtained from the proc file system unrelated to 
+# Falco's monitoring. These metrics help assess Falco's usage in relation to the 
+# server's workload intensity.
+#
+# `state_counters_enabled`: Emit counters related to Falco's state engine, including 
+# added, removed threads or file descriptors (fds), and failed lookup, store, or 
+# retrieve actions in relation to Falco's underlying process cache table (threadtable). 
+# We also log the number of currently cached containers if applicable.
 #
 # `kernel_event_counters_enabled`: Emit kernel side event and drop counters, as
 # an alternative to `syscall_event_drops`, but with some differences. These
@@ -766,17 +965,21 @@ metrics:
   output_rule: true
   # output_file: /tmp/falco_stats.jsonl
   resource_utilization_enabled: true
+  state_counters_enabled: true
   kernel_event_counters_enabled: true
   libbpf_stats_enabled: true
   convert_memory_to_mb: true
   include_empty_values: false
 
-
 #######################################
 # Falco performance tuning (advanced) #
 #######################################
 
-# [Stable] `syscall_buf_size_preset`
+# [DEPRECATED] `syscall_buf_size_preset`
+#
+# Deprecated in favor of engine.{kmod,ebpf,modern_ebpf}.buf_size_preset.
+# This config is evaluated only if the default `engine` config block is not changed,
+# otherwise it is ignored.
 #
 # --- [Description]
 #
@@ -828,10 +1031,14 @@ metrics:
 # if the default size is not suitable for your use case.
 syscall_buf_size_preset: 4
 
-# [Experimental] `syscall_drop_failed_exit`
+# [DEPRECATED] `syscall_drop_failed_exit`
+#
+# Deprecated in favor of engine.{kmod,ebpf,modern_ebpf}.drop_failed_exit.
+# This config is evaluated only if the default `engine` config block is not changed,
+# otherwise it is ignored.
 #
 # Enabling this option in Falco allows it to drop failed system call exit events
-# in the kernel driver before pushing them onto the ring buffer. This
+# in the kernel drivers before pushing them onto the ring buffer. This
 # optimization can result in lower CPU usage and more efficient utilization of
 # the ring buffer, potentially reducing the number of event losses. However, it
 # is important to note that enabling this option also means sacrificing some
@@ -953,7 +1160,11 @@ base_syscalls:
   custom_set: []
   repair: false
 
-# [Stable] `modern_bpf.cpus_for_each_syscall_buffer`, modern_bpf only
+# [DEPRECATED] `modern_bpf.cpus_for_each_syscall_buffer`, modern_bpf only
+#
+# Deprecated in favor of engine.modern_ebpf.cpus_for_each_buffer.
+# This config is evaluated only if the default `engine` config block is not changed,
+# otherwise it is ignored.
 #
 # --- [Description]
 #
@@ -1032,35 +1243,6 @@ base_syscalls:
 # buffers (higher `cpus_for_each_syscall_buffer`) can lower the memory footprint.
 modern_bpf:
   cpus_for_each_syscall_buffer: 2
-
-
-#################################################
-# Falco cloud orchestration systems integration #
-#################################################
-
-# [Stable] `metadata_download`
-#
-# When connected to an orchestrator like Kubernetes, Falco has the capability to
-# collect metadata and enrich system call events with contextual data. The
-# parameters mentioned here control the downloading process of this metadata.
-#
-# Please note that support for Mesos is deprecated, so these parameters
-# currently apply only to Kubernetes. When using Falco with Kubernetes, you can
-# enable this functionality by using the `-k` or `-K` command-line flag.
-#
-# However, it's worth mentioning that for important Kubernetes metadata fields
-# such as namespace or pod name, these fields are automatically extracted from
-# the container runtime, providing the necessary enrichment for common use cases
-# of syscall-based threat detection.
-#
-# In summary, the `-k` flag is typically not required for most scenarios involving
-# Kubernetes workload owner enrichment. The `-k` flag is primarily used when
-# additional metadata is required beyond the standard fields, catering to more
-# specific use cases, see https://falco.org/docs/reference/rules/supported-fields/#field-class-k8s.
-metadata_download:
-  max_mb: 100
-  chunk_wait_us: 1000
-  watch_freq_sec: 1
 
 # [Stable] Guidance for Kubernetes container engine command-line args settings
 #

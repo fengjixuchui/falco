@@ -56,7 +56,7 @@ struct state
         source_info& operator = (source_info&&) = default;
         source_info(const source_info&) = default;
         source_info& operator = (const source_info&) = default;
-    
+
         // The index of the given event source in the state's falco_engine,
         // as returned by falco_engine::add_source
         std::size_t engine_idx;
@@ -93,10 +93,6 @@ struct state
     }
 
     ~state() = default;
-    state(state&&) = default;
-    state& operator = (state&&) = default;
-    state(const state&) = default;
-    state& operator = (const state&) = default;
 
     std::string cmdline;
     falco::app::options options;
@@ -145,19 +141,81 @@ struct state
     falco_webserver webserver;
 #endif
 
-    inline bool is_capture_mode() const 
+    inline bool is_capture_mode() const
     {
-        return !options.trace_filename.empty();
+        return config->m_engine_mode == engine_kind_t::REPLAY;
     }
 
-    inline bool is_gvisor_enabled() const
+    inline bool is_gvisor() const
     {
-        return !options.gvisor_config.empty();
+        return config->m_engine_mode == engine_kind_t::GVISOR;
     }
-    
-    inline bool is_source_enabled(const std::string& src) const 
+
+    inline bool is_kmod() const
+    {
+        return config->m_engine_mode == engine_kind_t::KMOD;
+    }
+
+    inline bool is_ebpf() const
+    {
+        return config->m_engine_mode == engine_kind_t::EBPF;
+    }
+
+    inline bool is_modern_ebpf() const
+    {
+        return config->m_engine_mode == engine_kind_t::MODERN_EBPF;
+    }
+
+    inline bool is_nodriver() const
+    {
+        return config->m_engine_mode == engine_kind_t::NONE;
+    }
+
+    inline bool is_source_enabled(const std::string& src) const
     {
         return enabled_sources.find(falco_common::syscall_source) != enabled_sources.end();
+    }
+
+    inline bool is_driver_drop_failed_exit_enabled() const
+    {
+	bool drop_failed;
+	switch (config->m_engine_mode)
+	{
+	case engine_kind_t::KMOD:
+		drop_failed = config->m_kmod.m_drop_failed_exit;
+		break;
+	case engine_kind_t::EBPF:
+		drop_failed = config->m_ebpf.m_drop_failed_exit;
+		break;
+	case engine_kind_t::MODERN_EBPF:
+		drop_failed = config->m_modern_ebpf.m_drop_failed_exit;
+		break;
+	default:
+		drop_failed = false;
+		break;
+	}
+	return drop_failed;
+    }
+
+    inline int16_t driver_buf_size_preset() const
+    {
+	int16_t index;
+	switch (config->m_engine_mode) {
+	case engine_kind_t::KMOD:
+		index = config->m_kmod.m_buf_size_preset;
+		break;
+	case engine_kind_t::EBPF:
+		index = config->m_ebpf.m_buf_size_preset;
+		break;
+	case engine_kind_t::MODERN_EBPF:
+		index = config->m_modern_ebpf.m_buf_size_preset;
+		break;
+	default:
+		// unsupported
+		index = - 1;
+		break;
+	}
+	return index;
     }
 };
 

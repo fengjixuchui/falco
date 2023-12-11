@@ -27,9 +27,11 @@ limitations under the License.
 #include "watchdog.h"
 
 #include "outputs_file.h"
-#include "outputs_program.h"
 #include "outputs_stdout.h"
+#if !defined(_WIN32)
+#include "outputs_program.h"
 #include "outputs_syslog.h"
+#endif
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 #include "outputs_http.h"
 #include "outputs_grpc.h"
@@ -63,7 +65,7 @@ falco_outputs::falco_outputs(
 	{
 		add_output(output);
 	}
-	m_outputs_queue_num_drops = {0};
+	m_outputs_queue_num_drops = 0;
 #ifndef __EMSCRIPTEN__
 	m_queue.set_capacity(outputs_queue_capacity);
 	m_worker_thread = std::thread(&falco_outputs::worker, this);
@@ -90,18 +92,22 @@ void falco_outputs::add_output(falco::outputs::config oc)
 	{
 		oo = new falco::outputs::output_file();
 	}
+#ifndef _WIN32
 	else if(oc.name == "program")
 	{
 		oo = new falco::outputs::output_program();
 	}
+#endif
 	else if(oc.name == "stdout")
 	{
 		oo = new falco::outputs::output_stdout();
 	}
+#ifndef _WIN32
 	else if(oc.name == "syslog")
 	{
 		oo = new falco::outputs::output_syslog();
 	}
+#endif
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 	else if(oc.name == "http")
 	{
@@ -124,7 +130,7 @@ void falco_outputs::add_output(falco::outputs::config oc)
 	}
 	else
 	{
-		falco_logger::log(LOG_ERR, "Failed to init output: " + init_err);
+		falco_logger::log(falco_logger::level::ERR, "Failed to init output: " + init_err);
 		delete(oo);
 	}
 }
@@ -256,7 +262,7 @@ void falco_outputs::stop_worker()
 {
 	watchdog<void *> wd;
 	wd.start([&](void *) -> void {
-		falco_logger::log(LOG_NOTICE, "output channels still blocked, discarding all remaining notifications\n");
+		falco_logger::log(falco_logger::level::NOTICE, "output channels still blocked, discarding all remaining notifications\n");
 #ifndef __EMSCRIPTEN__
 		m_queue.clear();
 #endif
@@ -285,7 +291,7 @@ inline void falco_outputs::push(const ctrl_msg& cmsg)
 	{
 		if(m_outputs_queue_num_drops.load() == 0)
 		{
-			falco_logger::log(LOG_ERR, "Outputs queue out of memory. Drop event and continue on ...");
+			falco_logger::log(falco_logger::level::ERR, "Outputs queue out of memory. Drop event and continue on ...");
 		}
 		m_outputs_queue_num_drops++;
 	}
@@ -304,7 +310,7 @@ void falco_outputs::worker() noexcept
 {
 	watchdog<std::string> wd;
 	wd.start([&](const std::string& payload) -> void {
-		falco_logger::log(LOG_CRIT, "\"" + payload + "\" output timeout, all output channels are blocked\n");
+		falco_logger::log(falco_logger::level::CRIT, "\"" + payload + "\" output timeout, all output channels are blocked\n");
 	});
 
 	auto timeout = m_timeout;
@@ -326,7 +332,7 @@ void falco_outputs::worker() noexcept
 			}
 			catch(const std::exception &e)
 			{
-				falco_logger::log(LOG_ERR, o->get_name() + ": " + std::string(e.what()) + "\n");
+				falco_logger::log(falco_logger::level::ERR, o->get_name() + ": " + std::string(e.what()) + "\n");
 			}
 		}
 		wd.cancel_timeout();
@@ -348,7 +354,7 @@ inline void falco_outputs::process_msg(falco::outputs::abstract_output* o, const
 			o->reopen();
 			break;
 		default:
-			falco_logger::log(LOG_DEBUG, "Outputs worker received an unknown message type\n");
+			falco_logger::log(falco_logger::level::DEBUG, "Outputs worker received an unknown message type\n");
 	}
 }
 

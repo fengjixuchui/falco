@@ -39,10 +39,10 @@ falco::app::run_result falco::app::actions::load_rules_files(falco::app::state& 
 		return run_result::fatal("You must specify at least one rules file/directory via -r or a rules_file entry in falco.yaml");
 	}
 
-	falco_logger::log(LOG_DEBUG, "Configured rules filenames:\n");
+	falco_logger::log(falco_logger::level::DEBUG, "Configured rules filenames:\n");
 	for (const auto& path : s.config->m_rules_filenames)
 	{
-		falco_logger::log(LOG_DEBUG, std::string("   ") + path + "\n");
+		falco_logger::log(falco_logger::level::DEBUG, std::string("   ") + path + "\n");
 	}
 
 	for (const auto &path : s.config->m_rules_filenames)
@@ -67,7 +67,7 @@ falco::app::run_result falco::app::actions::load_rules_files(falco::app::state& 
 	std::string err = "";
 	for(auto &filename : s.config->m_loaded_rules_filenames)
 	{
-		falco_logger::log(LOG_INFO, "Loading rules from file " + filename + "\n");
+		falco_logger::log(falco_logger::level::INFO, "Loading rules from file " + filename + "\n");
 		std::unique_ptr<falco::load_result> res;
 
 		res = s.engine->load_rules(rc.at(filename), filename);
@@ -130,7 +130,7 @@ falco::app::run_result falco::app::actions::load_rules_files(falco::app::state& 
 
 	for (const auto& substring : s.options.disabled_rule_substrings)
 	{
-		falco_logger::log(LOG_INFO, "Disabling rules matching substring: " + substring + "\n");
+		falco_logger::log(falco_logger::level::INFO, "Disabling rules matching substring: " + substring + "\n");
 		s.engine->enable_rule(substring, false);
 	}
 
@@ -138,7 +138,7 @@ falco::app::run_result falco::app::actions::load_rules_files(falco::app::state& 
 	{
 		for(auto &tag : s.options.disabled_rule_tags)
 		{
-			falco_logger::log(LOG_INFO, "Disabling rules with tag: " + tag + "\n");
+			falco_logger::log(falco_logger::level::INFO, "Disabling rules with tag: " + tag + "\n");
 		}
 		s.engine->enable_rule_by_tag(s.options.disabled_rule_tags, false);
 	}
@@ -150,22 +150,27 @@ falco::app::run_result falco::app::actions::load_rules_files(falco::app::state& 
 		s.engine->enable_rule(all_rules, false);
 		for(auto &tag : s.options.enabled_rule_tags)
 		{
-			falco_logger::log(LOG_INFO, "Enabling rules with tag: " + tag + "\n");
+			falco_logger::log(falco_logger::level::INFO, "Enabling rules with tag: " + tag + "\n");
 		}
 		s.engine->enable_rule_by_tag(s.options.enabled_rule_tags, true);
 	}
 
-	if (s.options.describe_all_rules)
+	// printout of `-L` option
+	if (s.options.describe_all_rules || !s.options.describe_rule.empty())
 	{
+		std::string* rptr = !s.options.describe_rule.empty() ? &(s.options.describe_rule) : nullptr;
 		const auto& plugins = s.offline_inspector->get_plugin_manager()->plugins();
-		s.engine->describe_rule(NULL, plugins, s.config->m_json_output);
-		return run_result::exit();
-	}
+		auto out = s.engine->describe_rule(rptr, plugins);
 
-	if (!s.options.describe_rule.empty())
-	{
-		const auto& plugins = s.offline_inspector->get_plugin_manager()->plugins();
-		s.engine->describe_rule(&(s.options.describe_rule), plugins, s.config->m_json_output);
+		if (!s.config->m_json_output)
+		{
+			format_described_rules_as_text(out, std::cout);
+		}
+		else
+		{
+			std::cout << out.dump() << std::endl;
+		}
+
 		return run_result::exit();
 	}
 

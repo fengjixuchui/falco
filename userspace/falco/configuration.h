@@ -19,7 +19,11 @@ limitations under the License.
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 #include <yaml-cpp/yaml.h>
 #include <string>
 #include <vector>
@@ -33,17 +37,56 @@ limitations under the License.
 #include "event_drops.h"
 #include "falco_outputs.h"
 
+// todo!: remove them in Falco 0.38.0
+#define DEFAULT_BUF_SIZE_PRESET 4
+#define DEFAULT_CPUS_FOR_EACH_SYSCALL_BUFFER 2
+#define DEFAULT_DROP_FAILED_EXIT false
+
+enum class engine_kind_t : uint8_t
+{
+	KMOD,
+	EBPF,
+	MODERN_EBPF,
+	REPLAY,
+	GVISOR,
+	NONE
+};
+
 class falco_configuration
 {
 public:
-
-	typedef struct {
-	public:
+	struct plugin_config {
 		std::string m_name;
 		std::string m_library_path;
 		std::string m_init_config;
 		std::string m_open_params;
-	} plugin_config;
+	};
+
+	struct kmod_config {
+		int16_t m_buf_size_preset;
+		bool m_drop_failed_exit;
+	};
+
+	struct ebpf_config {
+		std::string m_probe_path;
+		int16_t m_buf_size_preset;
+		bool m_drop_failed_exit;
+	};
+
+	struct modern_ebpf_config {
+		uint16_t m_cpus_for_each_buffer;
+		int16_t m_buf_size_preset;
+		bool m_drop_failed_exit;
+	};
+
+	struct replay_config {
+		std::string m_capture_file;
+	};
+
+	struct gvisor_config {
+		std::string m_config;
+		std::string m_root;
+	};
 
 	falco_configuration();
 	virtual ~falco_configuration() = default;
@@ -59,7 +102,6 @@ public:
 	std::list<std::string> m_loaded_rules_filenames;
 	// List of loaded rule folders
 	std::list<std::string> m_loaded_rules_folders;
-
 	bool m_json_output;
 	bool m_json_include_output_property;
 	bool m_json_include_tags_property;
@@ -85,6 +127,7 @@ public:
 	bool m_webserver_enabled;
 	uint32_t m_webserver_threadiness;
 	uint32_t m_webserver_listen_port;
+	std::string m_webserver_listen_address;
 	std::string m_webserver_k8s_healthz_endpoint;
 	bool m_webserver_ssl_enabled;
 	std::string m_webserver_ssl_certificate;
@@ -98,18 +141,6 @@ public:
 
 	uint32_t m_syscall_evt_timeout_max_consecutives;
 
-	uint32_t m_metadata_download_max_mb;
-	uint32_t m_metadata_download_chunk_wait_us;
-	uint32_t m_metadata_download_watch_freq_sec;
-
-	// Index corresponding to the syscall buffer dimension.
-	uint16_t m_syscall_buf_size_preset;
-
-	// Number of CPUs associated with a single ring buffer.
-	uint16_t m_cpus_for_each_syscall_buffer;
-
-	bool m_syscall_drop_failed_exit;
-
 	// User supplied base_syscalls, overrides any Falco state engine enforcement.
 	std::unordered_set<std::string> m_base_syscalls_custom_set;
 	bool m_base_syscalls_repair;
@@ -120,16 +151,32 @@ public:
 	uint64_t m_metrics_interval;
 	bool m_metrics_stats_rule_enabled;
 	std::string m_metrics_output_file;
-	bool m_metrics_resource_utilization_enabled;
-	bool m_metrics_kernel_event_counters_enabled;
-	bool m_metrics_libbpf_stats_enabled;
+	uint32_t m_metrics_flags;
 	bool m_metrics_convert_memory_to_mb;
 	bool m_metrics_include_empty_values;
-
 	std::vector<plugin_config> m_plugins;
+
+	// Falco engine
+	engine_kind_t m_engine_mode = engine_kind_t::KMOD;
+	kmod_config m_kmod = {};
+	ebpf_config m_ebpf = {};
+	modern_ebpf_config m_modern_ebpf = {};
+	replay_config m_replay = {};
+	gvisor_config m_gvisor = {};
+
+	// todo!: to remove in Falco 0.38.0
+	// used to keep track if the `engine` config is used.
+	bool m_changes_in_engine_config = false;
+	// Index corresponding to the syscall buffer dimension.
+	uint16_t m_syscall_buf_size_preset = DEFAULT_BUF_SIZE_PRESET;
+	// Number of CPUs associated with a single ring buffer.
+	uint16_t m_cpus_for_each_syscall_buffer = DEFAULT_CPUS_FOR_EACH_SYSCALL_BUFFER;
+	bool m_syscall_drop_failed_exit = DEFAULT_DROP_FAILED_EXIT;
 
 private:
 	void load_yaml(const std::string& config_name, const yaml_helper& config);
+
+	void load_engine_config(const std::string& config_name, const yaml_helper& config);
 
 	void init_cmdline_options(yaml_helper& config, const std::vector<std::string>& cmdline_options);
 

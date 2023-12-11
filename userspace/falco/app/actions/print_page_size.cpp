@@ -16,6 +16,9 @@ limitations under the License.
 */
 
 #include "actions.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace falco::app;
 using namespace falco::app::actions;
@@ -24,14 +27,22 @@ falco::app::run_result falco::app::actions::print_page_size(falco::app::state& s
 {
 	if(s.options.print_page_size)
 	{
+#ifndef _WIN32
 		long page_size = getpagesize();
+#else
+		SYSTEM_INFO sysInfo;
+
+		GetSystemInfo(&sysInfo);
+
+		long page_size = sysInfo.dwPageSize;
+#endif
 		if(page_size <= 0)
 		{
 			return run_result::fatal("\nUnable to get the system page size through 'getpagesize()'\n");
 		}
 		else
 		{
-			falco_logger::log(LOG_INFO, "Your system page size is: " + std::to_string(page_size) + " bytes\n");
+			falco_logger::log(falco_logger::level::INFO, "Your system page size is: " + std::to_string(page_size) + " bytes\n");
 		}
 		return run_result::exit();
 	}

@@ -21,9 +21,15 @@ limitations under the License.
 
 #include <string.h>
 #include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
+#ifdef __linux__
 #include <sys/inotify.h>
 #include <sys/select.h>
+#endif
 
 #if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
 #include <sys/syscall.h>
@@ -60,7 +66,7 @@ bool falco::app::restart_handler::start(std::string& err)
             err = "could not watch file: " + f;
             return false;
         }
-        falco_logger::log(LOG_DEBUG, "Watching file '" + f +"'\n");
+        falco_logger::log(falco_logger::level::DEBUG, "Watching file '" + f +"'\n");
     }
 
     for (const auto &f : m_watched_dirs)
@@ -71,7 +77,7 @@ bool falco::app::restart_handler::start(std::string& err)
             err = "could not watch directory: " + f;
             return false;
         }
-        falco_logger::log(LOG_DEBUG, "Watching directory '" + f +"'\n");
+        falco_logger::log(falco_logger::level::DEBUG, "Watching directory '" + f +"'\n");
     }
 
     // launch the watcher thread
@@ -93,11 +99,12 @@ void falco::app::restart_handler::stop()
 
 void falco::app::restart_handler::watcher_loop() noexcept
 {
+#ifdef __linux__
     if (fcntl(m_inotify_fd, F_SETOWN, gettid()) < 0)
     {
         // an error occurred, we can't recover
         // todo(jasondellaluce): should we terminate the process?
-        falco_logger::log(LOG_ERR, "Failed owning inotify handler, shutting down watcher...");
+        falco_logger::log(falco_logger::level::ERR, "Failed owning inotify handler, shutting down watcher...");
         return;
     }
 
@@ -122,7 +129,7 @@ void falco::app::restart_handler::watcher_loop() noexcept
         {
             // an error occurred, we can't recover
             // todo(jasondellaluce): should we terminate the process?
-            falco_logger::log(LOG_ERR, "Failed select with inotify handler, shutting down watcher...");
+            falco_logger::log(falco_logger::level::ERR, "Failed select with inotify handler, shutting down watcher...");
             return;
         }
         
@@ -183,7 +190,7 @@ void falco::app::restart_handler::watcher_loop() noexcept
             {
                 // an error occurred, we can't recover
                 // todo(jasondellaluce): should we terminate the process?
-                falco_logger::log(LOG_ERR, "Failed read with inotify handler, shutting down watcher...");
+                falco_logger::log(falco_logger::level::ERR, "Failed read with inotify handler, shutting down watcher...");
                 return;
             }
             // this is an odd case, but if we got here with
@@ -207,4 +214,5 @@ void falco::app::restart_handler::watcher_loop() noexcept
         // next timeout.
         should_check = true;
     }
+#endif
 }
