@@ -35,8 +35,8 @@ else()
   # In case you want to test against another falcosecurity/libs version (or branch, or commit) just pass the variable -
   # ie., `cmake -DFALCOSECURITY_LIBS_VERSION=dev ..`
   if(NOT FALCOSECURITY_LIBS_VERSION)
-    set(FALCOSECURITY_LIBS_VERSION "000d576ef877cb115cbb56f97187a1d62221e2bd")
-    set(FALCOSECURITY_LIBS_CHECKSUM "SHA256=4f078e3e448ba1d4ca2eff55a361a9a9d048f3a967fb4d91f0c91aa6fa22d5d2")
+    set(FALCOSECURITY_LIBS_VERSION "ee01ba2b66b06835924379a9359ce3ef4a9ddb9b")
+    set(FALCOSECURITY_LIBS_CHECKSUM "SHA256=614c1d4ed4e6acbebd1e7e37f8ac51ccfd0fbdeddd2139d8e490d59f4b64ebbf")
   endif()
 
   # cd /path/to/build && cmake /path/to/source
@@ -85,6 +85,7 @@ set(BUILD_LIBSCAP_EXAMPLES OFF CACHE BOOL "")
 
 set(USE_BUNDLED_TBB ON CACHE BOOL "")
 set(USE_BUNDLED_JSONCPP ON CACHE BOOL "")
+set(USE_BUNDLED_NLOHMANN_JSON ON CACHE BOOL "")
 set(USE_BUNDLED_VALIJSON ON CACHE BOOL "")
 set(USE_BUNDLED_RE2 ON CACHE BOOL "")
 set(USE_BUNDLED_UTHASH ON CACHE BOOL "")
