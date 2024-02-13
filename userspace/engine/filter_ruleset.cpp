@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2023 The Falco Authors.
+Copyright (C) 2024 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,30 +15,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#pragma once
+#include "filter_ruleset.h"
 
-#include "outputs.h"
-#include <iostream>
-#include <fstream>
-
-namespace falco
+void filter_ruleset::set_engine_state(filter_ruleset::engine_state_funcs& engine_state)
 {
-namespace outputs
+	m_engine_state = engine_state;
+}
+
+filter_ruleset::engine_state_funcs& filter_ruleset::get_engine_state()
 {
-
-class output_file : public abstract_output
-{
-	void output(const message *msg) override;
-
-	void cleanup() override;
-
-	void reopen() override;
-
-private:
-	void open_file();
-
-	std::ofstream m_outfile;
-};
-
-} // namespace outputs
-} // namespace falco
+	return m_engine_state;
+}

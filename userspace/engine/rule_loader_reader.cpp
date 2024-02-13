@@ -22,7 +22,8 @@ limitations under the License.
 
 #include "rule_loader_reader.h"
 #include "falco_engine_version.h"
-#include "logger.h"
+#include "rule_loading_messages.h"
+#include <libsinsp/logger.h>
 
 #define THROW(cond, err, ctx)    { if ((cond)) { throw rule_loader::rule_load_exception(falco::load_result::LOAD_ERR_YAML_VALIDATE, (err), (ctx)); } }
 
@@ -56,20 +57,26 @@ static void decode_val_generic(const YAML::Node& item, const char *key, std::opt
 }
 
 template <typename T>
-static void decode_val(const YAML::Node& item, const char *key, T& out, const rule_loader::context& ctx)
+void rule_loader::reader::decode_val(const YAML::Node& item, const char *key, T& out, const rule_loader::context& ctx)
 {
 	bool optional = false;
 
 	decode_val_generic(item, key, out, ctx, optional);
 }
 
+template void rule_loader::reader::decode_val<std::string>(const YAML::Node& item, const char *key, std::string& out, const rule_loader::context& ctx);
+
 template <typename T>
-static void decode_optional_val(const YAML::Node& item, const char *key, T& out, const rule_loader::context& ctx)
+void rule_loader::reader::decode_optional_val(const YAML::Node& item, const char *key, T& out, const rule_loader::context& ctx)
 {
 	bool optional = true;
 
 	decode_val_generic(item, key, out, ctx, optional);
 }
+
+template void rule_loader::reader::decode_optional_val<std::string>(const YAML::Node& item, const char *key, std::string& out, const rule_loader::context& ctx);
+
+template void rule_loader::reader::decode_optional_val<bool>(const YAML::Node& item, const char *key, bool& out, const rule_loader::context& ctx);
 
 // Don't call this directly, call decode_items/decode_tags instead.
 template <typename T>
@@ -289,7 +296,7 @@ static void read_rule_exceptions(
 		rule_loader::context tmp(ex, rule_loader::context::EXCEPTION, "", exes_ctx);
 
 		THROW(!ex.IsMap(), "Rule exception must be a mapping", tmp);
-		decode_val(ex, "name", name, tmp);
+		rule_loader::reader::decode_val(ex, "name", name, tmp);
 
 		// Now use a real context including the exception name.
 		rule_loader::context ex_ctx(ex, rule_loader::context::EXCEPTION, name, parent);
@@ -346,7 +353,7 @@ inline static bool check_update_expected(std::set<std::string>& expected_keys, c
 	return true;
 }
 
-static void read_item(
+void rule_loader::reader::read_item(
 	rule_loader::configuration& cfg,
 	rule_loader::collector& collector,
 	const YAML::Node& item,
@@ -440,16 +447,17 @@ static void read_item(
 		decode_items(item, v.items, ctx);
 
 		decode_optional_val(item, "append", append, ctx);
-		
+		if(append)
+		{
+			cfg.res->add_warning(falco::load_result::LOAD_DEPRECATED_ITEM, WARNING_APPEND, ctx);
+		}
+
 		std::set<std::string> override_append, override_replace;
 		std::set<std::string> overridable {"items"};
 		decode_overrides(item, overridable, overridable, override_append, override_replace, ctx);
 		bool has_overrides = !override_append.empty() || !override_replace.empty();
 
-		if(append == true && has_overrides)
-		{
-			THROW(true, "Keys 'override' and 'append: true' cannot be used together.", ctx);
-		}
+		THROW(append && has_overrides, ERROR_OVERRIDE_APPEND, ctx);
 
 		// Since a list only has items, if we have chosen to append them we can append the entire object
 		// otherwise we just want to redefine the list.
@@ -482,16 +490,17 @@ static void read_item(
 		v.cond_ctx = rule_loader::context(item["condition"], rule_loader::context::MACRO_CONDITION, "", ctx);
 
 		decode_optional_val(item, "append", append, ctx);
+		if(append)
+		{
+			cfg.res->add_warning(falco::load_result::LOAD_DEPRECATED_ITEM, WARNING_APPEND, ctx);
+		}
 
 		std::set<std::string> override_append, override_replace;
 		std::set<std::string> overridable {"condition"};
 		decode_overrides(item, overridable, overridable, override_append, override_replace, ctx);
 		bool has_overrides = !override_append.empty() || !override_replace.empty();
 
-		if(append == true && has_overrides)
-		{
-			THROW(true, "Keys 'override' and 'append: true' cannot be used together.", ctx);
-		}
+		THROW((append && has_overrides), ERROR_OVERRIDE_APPEND, ctx);
 
 		// Since a macro only has a condition, if we have chosen to append to it we can append the entire object
 		// otherwise we just want to redefine the macro.
@@ -518,6 +527,10 @@ static void read_item(
 
 		bool has_append_flag = false;
 		decode_optional_val(item, "append", has_append_flag, ctx);
+		if(has_append_flag)
+		{
+			cfg.res->add_warning(falco::load_result::LOAD_DEPRECATED_ITEM, WARNING_APPEND, ctx);
+		}
 
 		std::set<std::string> override_append, override_replace;
 		std::set<std::string> overridable_append {"condition", "output", "desc", "tags", "exceptions"};
@@ -528,8 +541,7 @@ static void read_item(
 		bool has_overrides_replace = !override_replace.empty();
 		bool has_overrides = has_overrides_append || has_overrides_replace;
 
-		THROW((has_append_flag && has_overrides),
-			"Keys 'override' and 'append: true' cannot be used together. Add an append entry (e.g. 'condition: append') under override instead.", ctx);
+		THROW((has_append_flag && has_overrides), ERROR_OVERRIDE_APPEND, ctx);
 
 		if(has_overrides)
 		{
@@ -689,6 +701,7 @@ static void read_item(
 			    !item["priority"].IsDefined())
 			{
 				decode_val(item, "enabled", v.enabled, ctx);
+				cfg.res->add_warning(falco::load_result::LOAD_DEPRECATED_ITEM, WARNING_ENABLED, ctx);
 				collector.enable(cfg, v);
 			}
 			else

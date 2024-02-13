@@ -28,7 +28,8 @@ limitations under the License.
 #include "stats_writer.h"
 #include "logger.h"
 #include "config_falco.h"
-#include "strl.h"
+#include <libscap/strl.h>
+#include <libscap/scap_vtable.h>
 
 // note: ticker_t is an uint16_t, which is enough because we don't care about
 // overflows here. Threads calling stats_writer::handle() will just
@@ -168,9 +169,8 @@ stats_writer::ticker_t stats_writer::get_ticker()
 stats_writer::stats_writer(
 		const std::shared_ptr<falco_outputs>& outputs,
 		const std::shared_ptr<const falco_configuration>& config)
-	: m_initialized(false), m_total_samples(0)
+	: m_config(config)
 {
-	m_config = config;
 	if (config->m_metrics_enabled)
 	{
 		/* m_outputs should always be initialized because we use it
@@ -301,8 +301,7 @@ void stats_writer::worker() noexcept
 }
 
 stats_writer::collector::collector(const std::shared_ptr<stats_writer>& writer)
-	: m_writer(writer), m_last_tick(0),
-	  m_last_now(0), m_last_n_evts(0), m_last_n_drops(0), m_last_num_evts(0)
+	: m_writer(writer)
 {
 }
 
@@ -366,9 +365,16 @@ void stats_writer::collector::get_metrics_output_fields_additional(
 	sinsp_thread_manager* thread_manager = inspector->m_thread_manager;
 	const scap_stats_v2* sinsp_stats_v2_snapshot = libsinsp::stats::get_sinsp_stats_v2(flags, agent_info, thread_manager, sinsp_stats_v2, buffer, &nstats, &rc);
 
+	uint32_t base_stat = 0;
+	// todo @incertum this needs to become better with the next proper stats refactor in libs 0.15.0
+	if ((flags & PPM_SCAP_STATS_STATE_COUNTERS) && !(flags & PPM_SCAP_STATS_RESOURCE_UTILIZATION))
+	{
+		base_stat = SINSP_STATS_V2_N_THREADS;
+	}
+
 	if (sinsp_stats_v2_snapshot && rc == 0 && nstats > 0)
 	{
-		for(uint32_t stat = 0; stat < nstats; stat++)
+		for(uint32_t stat = base_stat; stat < nstats; stat++)
 		{
 			if (sinsp_stats_v2_snapshot[stat].name[0] == '\0')
 			{
@@ -376,6 +382,12 @@ void stats_writer::collector::get_metrics_output_fields_additional(
 			}
 			char metric_name[STATS_NAME_MAX] = "falco.";
 			strlcat(metric_name, sinsp_stats_v2_snapshot[stat].name, sizeof(metric_name));
+			// todo @incertum temporary fix for n_fds and n_threads, type assignment was missed in libs, will be fixed in libs 0.15.0
+			if (strncmp(sinsp_stats_v2_snapshot[stat].name, "n_fds", 6) == 0 || strncmp(sinsp_stats_v2_snapshot[stat].name, "n_threads", 10) == 0)
+			{
+				output_fields[metric_name] = sinsp_stats_v2_snapshot[stat].value.u64;
+			}
+
 			switch(sinsp_stats_v2_snapshot[stat].type)
 			{
 			case STATS_VALUE_TYPE_U64:

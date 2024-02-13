@@ -25,7 +25,7 @@ limitations under the License.
 #include "falco_source.h"
 #include "falco_load_result.h"
 #include "indexed_vector.h"
-#include "version.h"
+#include <libsinsp/version.h>
 
 namespace rule_loader
 {
@@ -58,7 +58,8 @@ namespace rule_loader
 			RULE_OUTPUT,
 			RULE_OUTPUT_EXPRESSION,
 			RULE_PRIORITY,
-			OVERRIDE
+			OVERRIDE,
+			EXTENSION_ITEM
 		};
 
 		static const std::string& item_type_as_string(enum item_type it);
@@ -225,7 +226,7 @@ namespace rule_loader
 	class result : public falco::load_result
 	{
 	public:
-		result(const std::string &name);
+		explicit result(const std::string &name);
 		virtual ~result() = default;
 		result(result&&) = default;
 		result& operator = (result&&) = default;
@@ -292,7 +293,7 @@ namespace rule_loader
 	struct engine_version_info
 	{
 		engine_version_info() : ctx("no-filename-given"), version("0.0.0") { };
-		engine_version_info(context &ctx);
+		explicit engine_version_info(context &ctx);
 		~engine_version_info() = default;
 		engine_version_info(engine_version_info&&) = default;
 		engine_version_info& operator = (engine_version_info&&) = default;
@@ -328,7 +329,7 @@ namespace rule_loader
 		// a default constructor. This allows it to be used
 		// by falco_engine, which aliases the type.
 		plugin_version_info();
-		plugin_version_info(context &ctx);
+		explicit plugin_version_info(context &ctx);
 		~plugin_version_info() = default;
 		plugin_version_info(plugin_version_info&&) = default;
 		plugin_version_info& operator = (plugin_version_info&&) = default;
@@ -344,7 +345,7 @@ namespace rule_loader
 	*/
 	struct list_info
 	{
-		list_info(context &ctx);
+		explicit list_info(context &ctx);
 		~list_info() = default;
 		list_info(list_info&&) = default;
 		list_info& operator = (list_info&&) = default;
@@ -363,7 +364,7 @@ namespace rule_loader
 	*/
 	struct macro_info
 	{
-		macro_info(context &ctx);
+		explicit macro_info(context &ctx);
 		~macro_info() = default;
 		macro_info(macro_info&&) = default;
 		macro_info& operator = (macro_info&&) = default;
@@ -383,7 +384,7 @@ namespace rule_loader
 	*/
 	struct rule_exception_info
 	{
-		rule_exception_info(context &ctx);
+		explicit rule_exception_info(context &ctx);
 		~rule_exception_info() = default;
 		rule_exception_info(rule_exception_info&&) = default;
 		rule_exception_info& operator = (rule_exception_info&&) = default;
@@ -428,7 +429,7 @@ namespace rule_loader
 	*/
 	struct rule_info
 	{
-		rule_info(context &ctx);
+		explicit rule_info(context &ctx);
 		~rule_info() = default;
 		rule_info(rule_info&&) = default;
 		rule_info& operator = (rule_info&&) = default;
@@ -460,7 +461,7 @@ namespace rule_loader
 
 	struct rule_update_info
 	{
-		rule_update_info(context &ctx);
+		explicit rule_update_info(context &ctx);
 		~rule_update_info() = default;
 		rule_update_info(rule_update_info&&) = default;
 		rule_update_info& operator = (rule_update_info&&) = default;

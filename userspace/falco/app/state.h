@@ -28,7 +28,7 @@ limitations under the License.
 #include "../webserver.h"
 #endif
 
-#include <sinsp.h>
+#include <libsinsp/sinsp.h>
 
 #include <string>
 #include <memory>
@@ -72,18 +72,18 @@ struct state
 
     state():
         restart(false),
+        config(std::make_shared<falco_configuration>()),
+        outputs(nullptr),
+        engine(std::make_shared<falco_engine>()),
         loaded_sources(),
         enabled_sources(),
+        offline_inspector(std::make_shared<sinsp>()),
         source_infos(),
         plugin_configs(),
         selected_sc_set(),
-        syscall_buffer_bytes_size(DEFAULT_DRIVER_BUFFER_BYTES_DIM)
+        syscall_buffer_bytes_size(DEFAULT_DRIVER_BUFFER_BYTES_DIM),
+        restarter(nullptr)
     {
-        config = std::make_shared<falco_configuration>();
-        engine = std::make_shared<falco_engine>();
-        offline_inspector = std::make_shared<sinsp>();
-        outputs = nullptr;
-        restarter = nullptr;
     }
 
     state(const std::string& cmd, const falco::app::options& opts): state()
@@ -168,7 +168,7 @@ struct state
 
     inline bool is_nodriver() const
     {
-        return config->m_engine_mode == engine_kind_t::NONE;
+        return config->m_engine_mode == engine_kind_t::NODRIVER;
     }
 
     inline bool is_source_enabled(const std::string& src) const

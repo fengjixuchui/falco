@@ -21,7 +21,7 @@ limitations under the License.
 #include <string>
 #include "falco_common.h"
 
-#include <filter/ast.h>
+#include <libsinsp/filter/ast.h>
 
 /*!
 	\brief Represents a list in the Falco Engine.
@@ -83,4 +83,5 @@ struct falco_rule
 	std::set<std::string> exception_fields;
 	falco_common::priority_type priority;
 	std::shared_ptr<libsinsp::filter::ast::expr> condition;
+	std::shared_ptr<sinsp_filter> filter;
 };

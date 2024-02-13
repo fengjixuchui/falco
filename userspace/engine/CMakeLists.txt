@@ -16,6 +16,7 @@ add_library(falco_engine STATIC
     falco_engine.cpp
     falco_load_result.cpp
     falco_utils.cpp
+    filter_ruleset.cpp
     evttype_index_ruleset.cpp
     formats.cpp
     filter_details_resolver.cpp
@@ -36,10 +37,9 @@ add_dependencies(falco_engine yamlcpp njson)
 
 target_include_directories(falco_engine
 PUBLIC
-    ${LIBSCAP_INCLUDE_DIRS}
-    ${LIBSINSP_INCLUDE_DIRS}
+    ${LIBS_DIR}/userspace
     ${PROJECT_BINARY_DIR}/userspace/engine
-    ${nlohmann_json_DIR}
+    ${nlohmann_json_INCLUDE_DIRS}
     ${TBB_INCLUDE_DIR}
     ${YAMLCPP_INCLUDE_DIR}
 )

@@ -17,11 +17,12 @@ limitations under the License.
 
 #pragma once
 
-#include <event.h>
+#include <libsinsp/event.h>
 
 #include <string>
 #include <vector>
 #include <set>
+#include <list>
 
 namespace cxxopts { class Options; };
 

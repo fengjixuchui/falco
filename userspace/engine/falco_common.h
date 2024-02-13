@@ -20,7 +20,7 @@ limitations under the License.
 #include <string>
 #include <exception>
 #include <mutex>
-#include <sinsp.h>
+#include <libsinsp/sinsp.h>
 
 //
 // equivalent to an "unbounded queue" in TBB terms or largest long value
@@ -34,27 +34,9 @@ limitations under the License.
 // be of this type.
 //
 
-struct falco_exception : std::exception
+struct falco_exception : std::runtime_error
 {
-	falco_exception()
-	{
-	}
-
-	virtual ~falco_exception() throw()
-	{
-	}
-
-	falco_exception(std::string error_str)
-	{
-		m_error_str = error_str;
-	}
-
-	char const* what() const throw()
-	{
-		return m_error_str.c_str();
-	}
-
-	std::string m_error_str;
+	using std::runtime_error::runtime_error;
 };
 
 namespace falco_common

@@ -16,6 +16,7 @@ cmake_minimum_required(VERSION 3.5.1)
 project(falco)
 
 option(USE_BUNDLED_DEPS "Bundle hard to find dependencies into the Falco binary" OFF)
+option(USE_DYNAMIC_LIBELF "Dynamically link libelf" ON)
 option(BUILD_WARNINGS_AS_ERRORS "Enable building with -Wextra -Werror flags" OFF)
 option(MINIMAL_BUILD "Build a minimal version of Falco, containing only the engine and basic input/output (EXPERIMENTAL)" OFF)
 option(MUSL_OPTIMIZED_BUILD "Enable if you want a musl optimized build" OFF)
@@ -180,7 +181,6 @@ include(static-analysis)
 # Shared build variables
 set(FALCO_SINSP_LIBRARY sinsp)
 set(FALCO_SHARE_DIR share/falco)
-set(FALCO_PLUGINS_DIR ${FALCO_SHARE_DIR}/plugins)
 set(FALCO_ABSOLUTE_SHARE_DIR "${CMAKE_INSTALL_PREFIX}/${FALCO_SHARE_DIR}")
 set(FALCO_BIN_DIR bin)
 
@@ -189,7 +189,6 @@ add_subdirectory(userspace/engine)
 add_subdirectory(userspace/falco)
 
 if(NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN AND NOT MUSL_OPTIMIZED_BUILD)
-  include(plugins)
   include(falcoctl)
 endif()
 

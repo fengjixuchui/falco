@@ -69,13 +69,16 @@ jobs:
   test-packages:
     needs: [release-settings, build-packages]
     uses: ./.github/workflows/reusable_test_packages.yaml
-    strategy:
-      fail-fast: false
-      matrix:
-        static: ["static", ""]
+
+    # The musl build job is currently disabled because we link libelf dynamically and it is
+    # not possible to dynamically link with musl
+    # strategy:
+    #   fail-fast: false
+    #   matrix:
+    #     static: ["static", ""]
     with:
       arch: x86_64
-      static: ${{ matrix.static != '' && true || false }}
+      # static: ${{ matrix.static != '' && true || false }}
       version: ${{ github.event.release.tag_name }}
   
   test-packages-arm64:
@@ -137,7 +140,7 @@ jobs:
         run: |
           cp .github/release_template.md release-body.md
           LIBS_VERS=$(cat cmake/modules/falcosecurity-libs.cmake | grep 'set(FALCOSECURITY_LIBS_VERSION' | tail -n1 | grep -o '[[:digit:]]*\.[[:digit:]]*\.[[:digit:]]*')
-          DRIVER_VERS=$(cat cmake/modules/driver.cmake | grep 'set(DRIVER_VERSION' | tail -n1 | grep -o '[[:digit:]]*\.[[:digit:]]*\.[[:digit:]]*')
+          DRIVER_VERS=$(cat cmake/modules/driver.cmake | grep 'set(DRIVER_VERSION' | tail -n1 | grep -o '[[:digit:]]*\.[[:digit:]]*\.[[:digit:]]*+driver')
           sed -i s/LIBSVER/$LIBS_VERS/g release-body.md
           sed -i s/DRIVERVER/$DRIVER_VERS/g release-body.md
           
@@ -147,7 +150,7 @@ jobs:
           sed -i s/FALCOVER/${{ github.event.release.tag_name }}/g release-body.md
           
       - name: Generate release notes
-        uses: leodido/rn2md@0669e5f3b21492c11c2db43cd6e267566f5880f3
+        uses: leodido/rn2md@9c351d81278644c0e17b1ca68edbdba305276c73
         with:
           milestone: ${{ github.event.release.tag_name }}
           output: ./notes.md

@@ -18,20 +18,33 @@ limitations under the License.
 #pragma once
 
 #include "falco_rule.h"
-#include <filter/ast.h>
-#include <filter.h>
-#include <event.h>
-#include <gen_filter.h>
-#include <events/sinsp_events.h>
+#include "rule_loader_compile_output.h"
+#include <libsinsp/filter/ast.h>
+#include <libsinsp/filter.h>
+#include <libsinsp/event.h>
+#include <libsinsp/events/sinsp_events.h>
 
 /*!
 	\brief Manages a set of rulesets. A ruleset is a set of
 	enabled rules that is able to process events and find matches for those rules.
 */
+
 class filter_ruleset
 {
 public:
+	// A set of functions that can be used to retrieve state from
+	// the falco engine that created this ruleset.
+	struct engine_state_funcs
+	{
+		using ruleset_retriever_func_t = std::function<bool(const std::string &, std::shared_ptr<filter_ruleset> &ruleset)>;
+
+		ruleset_retriever_func_t get_ruleset;
+	};
+
 	virtual ~filter_ruleset() = default;
+
+	void set_engine_state(engine_state_funcs &engine_state);
+	engine_state_funcs &get_engine_state();
 
 	/*!
 		\brief Adds a rule and its filtering filter + condition inside the manager.
@@ -47,8 +60,37 @@ public:
 	*/
 	virtual void add(
 		const falco_rule& rule,
-		std::shared_ptr<gen_event_filter> filter,
+		std::shared_ptr<sinsp_filter> filter,
 		std::shared_ptr<libsinsp::filter::ast::expr> condition) = 0;
+
+	/*!
+		\brief Adds all rules contained in the provided
+		rule_loader::compile_output struct. Only
+		those rules with the provided source and those rules
+		with priority >= min_priority should be added. The
+		intent is that this replaces add(). However, we retain
+		add() for backwards compatibility. Any rules added via
+		add() are also added to this ruleset. The default
+		implementation iterates over rules and calls add(),
+		but can be overridden.
+		\param rule The compile output.
+		\param min_priority Only add rules with priority above this priority.
+		\param source Only add rules with source equal to this source.
+	*/
+	virtual void add_compile_output(
+		const rule_loader::compile_output& compile_output,
+		falco_common::priority_type min_priority,
+		const std::string& source)
+	{
+		for (const auto& rule : compile_output.rules)
+		{
+			if(rule.priority <= min_priority &&
+			   rule.source == source)
+			{
+				add(rule, rule.filter, rule.condition);
+			}
+		}
+	};
 
 	/*!
 		\brief Erases the internal state. All rules are disabled in each
@@ -71,7 +113,7 @@ public:
 		\param ruleset_id The id of the ruleset to be used
 	*/
 	virtual bool run(
-		gen_event *evt,
+		sinsp_evt *evt,
 		falco_rule& match,
 		uint16_t ruleset_id) = 0;
 	
@@ -84,7 +126,7 @@ public:
 		\param ruleset_id The id of the ruleset to be used
 	*/
 	virtual bool run(
-		gen_event *evt,
+		sinsp_evt *evt,
 		std::vector<falco_rule>& matches,
 		uint16_t ruleset_id) = 0;
 
@@ -181,6 +223,9 @@ public:
 	virtual void disable_tags(
 		const std::set<std::string> &tags,
 		uint16_t ruleset_id) = 0;
+
+private:
+	engine_state_funcs m_engine_state;
 };
 
 /*!

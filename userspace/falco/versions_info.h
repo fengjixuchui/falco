@@ -20,8 +20,11 @@ limitations under the License.
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <sinsp.h>
+#include <libsinsp/sinsp.h>
 #include <nlohmann/json.hpp>
+
+#include "config_falco.h"
+#include "falco_engine_version.h"
 
 namespace falco
 {
@@ -34,7 +37,7 @@ namespace falco
          * @brief Construct a versions info by using an inspector to obtain
          * versions about the drivers and the loaded plugins.
          */
-        versions_info(const std::shared_ptr<sinsp>& inspector);
+        explicit versions_info(const std::shared_ptr<sinsp>& inspector);
         versions_info(versions_info&&) = default;
         versions_info& operator = (versions_info&&) = default;
         versions_info(const versions_info& s) = default;
@@ -45,13 +48,13 @@ namespace falco
          */
         nlohmann::json as_json() const;
 
-        std::string falco_version;
-        std::string engine_version;
-        std::string libs_version;
+        std::string falco_version = FALCO_VERSION;
+        std::string engine_version = FALCO_ENGINE_VERSION;
+        std::string libs_version = FALCOSECURITY_LIBS_VERSION;
         std::string plugin_api_version;
         std::string driver_api_version;
         std::string driver_schema_version;
-        std::string default_driver_version;
+        std::string default_driver_version = DRIVER_VERSION;
         std::unordered_map<std::string, std::string> plugin_versions;
     };
 };

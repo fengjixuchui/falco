@@ -35,7 +35,7 @@ limitations under the License.
 #include "../../falco_outputs.h"
 #include "../../event_drops.h"
 
-#include <plugin_manager.h>
+#include <libsinsp/plugin_manager.h>
 
 using namespace falco::app;
 using namespace falco::app::actions;
@@ -43,7 +43,7 @@ using namespace falco::app::actions;
 class source_sync_context
 {
 public:
-	source_sync_context(falco::semaphore& s)
+	explicit source_sync_context(falco::semaphore& s)
 		: m_finished(false), m_joined(false), m_semaphore(s) { }
 
 	inline void finish()

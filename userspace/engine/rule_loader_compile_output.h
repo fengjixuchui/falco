@@ -17,28 +17,23 @@ limitations under the License.
 
 #pragma once
 
-#include "outputs.h"
-#include <iostream>
-#include <fstream>
+#include "indexed_vector.h"
+#include "falco_rule.h"
 
-namespace falco
+namespace rule_loader
 {
-namespace outputs
-{
+	struct compile_output
+	{
+		compile_output() = default;
+		virtual ~compile_output() = default;
+		compile_output(compile_output&&) = default;
+		compile_output& operator = (compile_output&&) = default;
+		compile_output(const compile_output&) = default;
+		compile_output& operator = (const compile_output&) = default;
 
-class output_file : public abstract_output
-{
-	void output(const message *msg) override;
-
-	void cleanup() override;
-
-	void reopen() override;
-
-private:
-	void open_file();
-
-	std::ofstream m_outfile;
+		indexed_vector<falco_list> lists;
+		indexed_vector<falco_macro> macros;
+		indexed_vector<falco_rule> rules;
+	};
 };
 
-} // namespace outputs
-} // namespace falco

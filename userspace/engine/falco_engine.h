@@ -15,12 +15,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Gen filtering TODO
-//  - DONE Clean up use/sharing of factories amongst engine-related classes.
-//  - DONE Fix outputs to actually use factories
-//  - Review gen_filter apis to see if they have only the required interfaces
-//  - Fix json filterchecks to split json and evt.time filterchecks.
-
 #pragma once
 
 #include <atomic>
@@ -30,17 +24,16 @@ limitations under the License.
 
 #include <nlohmann/json.hpp>
 
-#include "gen_filter.h"
 #include "filter_ruleset.h"
 #include "rule_loader.h"
+#include "rule_loader_reader.h"
 #include "rule_loader_collector.h"
+#include "rule_loader_compiler.h"
 #include "stats_manager.h"
 #include "falco_common.h"
 #include "falco_source.h"
 #include "falco_load_result.h"
 #include "filter_details_resolver.h"
-#include "rule_loader_reader.h"
-#include "rule_loader_compiler.h"
 
 //
 // This class acts as the primary interface between a program and the
@@ -51,7 +44,7 @@ limitations under the License.
 class falco_engine
 {
 public:
-	falco_engine(bool seed_rng=true);
+	explicit falco_engine(bool seed_rng=true);
 	virtual ~falco_engine();
 
 	// A given engine has a version which identifies the fields
@@ -73,16 +66,20 @@ public:
 	// If source is non-empty, only fields for the provided source are printed.
 	void list_fields(std::string &source, bool verbose, bool names_only, bool markdown) const;
 
-	//
-	// Load rules either directly or from a filename.
-	//
-	void load_rules_file(const std::string &rules_filename, bool verbose, bool all_events);
-	void load_rules(const std::string &rules_content, bool verbose, bool all_events);
+	// Provide an alternate rule reader, collector, and compiler
+	// to compile any rules provided via load_rules*
+	void set_rule_reader(std::shared_ptr<rule_loader::reader> reader);
+	std::shared_ptr<rule_loader::reader> get_rule_reader();
+
+	void set_rule_collector(std::shared_ptr<rule_loader::collector> collector);
+	std::shared_ptr<rule_loader::collector> get_rule_collector();
+
+	void set_rule_compiler(std::shared_ptr<rule_loader::compiler> compiler);
+	std::shared_ptr<rule_loader::compiler> get_rule_compiler();
 
 	//
-	// Identical to above, but returns a result object instead of
-	// throwing exceptions on error.
-	std::unique_ptr<falco::load_result> load_rules_file(const std::string &rules_filename);
+	// Load rules and returns a result object.
+	//
 	std::unique_ptr<falco::load_result> load_rules(const std::string &rules_content, const std::string &name);
 
 	//
@@ -176,7 +173,7 @@ public:
 	// Represents the result of matching an event against a set of
 	// rules.
 	struct rule_result {
-		gen_event *evt;
+		sinsp_evt *evt;
 		std::string rule;
 		std::string source;
 		falco_common::priority_type priority_num;
@@ -210,7 +207,7 @@ public:
 	// concurrently with the same source_idx would inherently cause data races
 	// and lead to undefined behavior.
 	std::unique_ptr<std::vector<rule_result>> process_event(std::size_t source_idx,
-		gen_event *ev, uint16_t ruleset_id, falco_common::rule_matching strategy);
+		sinsp_evt *ev, uint16_t ruleset_id, falco_common::rule_matching strategy);
 
 	//
 	// Wrapper assuming the default ruleset.
@@ -218,7 +215,7 @@ public:
 	// This inherits the same thread-safety guarantees.
 	//
 	std::unique_ptr<std::vector<rule_result>> process_event(std::size_t source_idx,
-		gen_event *ev, falco_common::rule_matching strategy);
+		sinsp_evt *ev, falco_common::rule_matching strategy);
 
 	//
 	// Configure the engine to support events with the provided
@@ -226,21 +223,46 @@ public:
 	// Return source index for fast lookup.
 	//
 	std::size_t add_source(const std::string &source,
-			       std::shared_ptr<gen_event_filter_factory> filter_factory,
-			       std::shared_ptr<gen_event_formatter_factory> formatter_factory);
+			       std::shared_ptr<sinsp_filter_factory> filter_factory,
+			       std::shared_ptr<sinsp_evt_formatter_factory> formatter_factory);
 
 	//
 	// Equivalent to above, but allows specifying a ruleset factory
 	// for the newly added source.
 	//
 	std::size_t add_source(const std::string &source,
-			       std::shared_ptr<gen_event_filter_factory> filter_factory,
-			       std::shared_ptr<gen_event_formatter_factory> formatter_factory,
+			       std::shared_ptr<sinsp_filter_factory> filter_factory,
+			       std::shared_ptr<sinsp_evt_formatter_factory> formatter_factory,
 			       std::shared_ptr<filter_ruleset_factory> ruleset_factory);
 
 	// Return whether or not there is a valid filter/formatter
 	// factory for this source.
 	bool is_source_valid(const std::string &source) const;
+
+	//
+	// Given a source, return a formatter factory that can create
+	// filters for events of that source.
+	//
+	std::shared_ptr<sinsp_filter_factory> filter_factory_for_source(const std::string& source);
+	std::shared_ptr<sinsp_filter_factory> filter_factory_for_source(std::size_t source_idx);
+
+	//
+	// Given a source, return a formatter factory that can create
+	// formatters for an event.
+	//
+	std::shared_ptr<sinsp_evt_formatter_factory> formatter_factory_for_source(const std::string& source);
+	std::shared_ptr<sinsp_evt_formatter_factory> formatter_factory_for_source(std::size_t source_idx);
+
+	//
+	// Given a source, return a ruleset factory that can create
+	// rulesets for that source.
+	//
+	std::shared_ptr<filter_ruleset_factory> ruleset_factory_for_source(const std::string& source);
+	std::shared_ptr<filter_ruleset_factory> ruleset_factory_for_source(std::size_t source_idx);
+
+	// Return the filter_ruleset used for a given source.
+	std::shared_ptr<filter_ruleset> ruleset_for_source(const std::string& source);
+	std::shared_ptr<filter_ruleset> ruleset_for_source(std::size_t source_idx);
 
 	//
 	// Given an event source and ruleset, fill in a bitset
@@ -271,10 +293,10 @@ public:
 
 	//
 	// Given a source and output string, return an
-	// gen_event_formatter that can format output strings for an
+	// sinsp_evt_formatter that can format output strings for an
 	// event.
 	//
-	std::shared_ptr<gen_event_formatter> create_formatter(const std::string &source,
+	std::shared_ptr<sinsp_evt_formatter> create_formatter(const std::string &source,
 							      const std::string &output) const;
 
 	// The rule loader definition is aliased as it is exactly what we need
@@ -292,21 +314,58 @@ public:
 		std::string& err) const;
 
 private:
+	// Create a ruleset using the provided factory and set the
+	// engine state funcs for it.
+	std::shared_ptr<filter_ruleset> create_ruleset(std::shared_ptr<filter_ruleset_factory>& ruleset_factory);
+
+	// Functions to retrieve state from this engine
+	void fill_engine_state_funcs(filter_ruleset::engine_state_funcs& engine_state);
+
+	filter_ruleset::engine_state_funcs m_engine_state;
 
 	// Throws falco_exception if the file can not be read
 	void read_file(const std::string& filename, std::string& contents);
 
-	// For load_rules methods that throw exceptions on error,
-	// interpret a load_result and throw an exception if needed.
-	void interpret_load_result(std::unique_ptr<falco::load_result>& res,
-				   const std::string& rules_filename,
-				   const std::string& rules_content,
-				   bool verbose);
-
 	indexed_vector<falco_source> m_sources;
 
-	const falco_source* find_source(std::size_t index) const;
-	const falco_source* find_source(const std::string& name) const;
+	inline const falco_source* find_source(std::size_t index)
+	{
+		const falco_source *source;
+
+		if(index == m_syscall_source_idx)
+		{
+			if(m_syscall_source == NULL)
+			{
+				m_syscall_source = m_sources.at(m_syscall_source_idx);
+				if(!m_syscall_source)
+				{
+					throw falco_exception("Unknown event source index " + std::to_string(index));
+				}
+			}
+
+			source = m_syscall_source;
+		}
+		else
+		{
+			source = m_sources.at(index);
+			if(!source)
+			{
+				throw falco_exception("Unknown event source index " + std::to_string(index));
+			}
+		}
+
+		return source;
+	}
+
+	inline const falco_source* find_source(const std::string& name) const
+	{
+		auto ret = m_sources.at(name);
+		if(!ret)
+		{
+			throw falco_exception("Unknown event source " + name);
+		}
+		return ret;
+	}
 
 	// To allow the engine to be extremely fast for syscalls (can
 	// be > 1M events/sec), we save the syscall source/source_idx
@@ -348,15 +407,17 @@ private:
 		const std::unordered_set<std::string>& fields,
 		const std::vector<std::shared_ptr<sinsp_plugin>>& plugins) const;
 
-	rule_loader::collector m_rule_collector;
 	indexed_vector<falco_rule> m_rules;
+	std::shared_ptr<rule_loader::reader> m_rule_reader;
+	std::shared_ptr<rule_loader::collector> m_rule_collector;
+	std::shared_ptr<rule_loader::compiler> m_rule_compiler;
 	stats_manager m_rule_stats_manager;
 
 	uint16_t m_next_ruleset_id;
 	std::map<std::string, uint16_t> m_known_rulesets;
 	falco_common::priority_type m_min_priority;
 
-	std::unique_ptr<rule_loader::compiler::compile_output> m_last_compile_output;
+	std::unique_ptr<rule_loader::compile_output> m_last_compile_output;
 
 	//
 	// Here's how the sampling ratio and multiplier influence
@@ -387,4 +448,3 @@ private:
 	std::string m_extra;
 	bool m_replace_container_info;
 };
-
