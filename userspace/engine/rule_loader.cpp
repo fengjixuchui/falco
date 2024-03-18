@@ -81,12 +81,12 @@ rule_loader::context::context(const libsinsp::filter::ast::pos_info& pos,
 	// Contexts based on conditions don't use the
 	// filename. Instead the "name" is just the condition, and
 	// uses a short prefix of the condition.
-	std::string name = "\"" + (
+	std::string condition_name = "\"" + (
 		condition.length() > 20
 		? condition.substr(0, 20 - 3) + "...\""
 		: condition + "\"");
-	std::replace(name.begin(), name.end(), '\n', ' ');
-	std::replace(name.begin(), name.end(), '\r', ' ');
+	std::replace(condition_name.begin(), condition_name.end(), '\n', ' ');
+	std::replace(condition_name.begin(), condition_name.end(), '\r', ' ');
 
 	std::string item_name = "";
 
@@ -100,7 +100,7 @@ rule_loader::context::context(const libsinsp::filter::ast::pos_info& pos,
 	condpos.line = pos.line + lastpos.pos.line;
 	condpos.column = pos.col + lastpos.pos.column;
 
-	init(name, condpos, rule_loader::context::CONDITION_EXPRESSION, item_name, parent);
+	init(condition_name, condpos, rule_loader::context::CONDITION_EXPRESSION, item_name, parent);
 }
 
 const std::string& rule_loader::context::name() const
@@ -140,7 +140,7 @@ std::string rule_loader::context::as_string()
 
 	bool first = true;
 
-	for(auto& loc : m_locs)
+	for(const auto& loc : m_locs)
 	{
 		os << (first ? "In " : "    ");
 		first = false;
@@ -174,7 +174,7 @@ nlohmann::json rule_loader::context::as_json()
 		throw falco_exception("rule_loader::context without location?");
 	}
 
-	for(auto& loc : m_locs)
+	for(const auto& loc : m_locs)
 	{
 		nlohmann::json jloc, jpos;
 

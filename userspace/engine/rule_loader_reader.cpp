@@ -25,7 +25,19 @@ limitations under the License.
 #include "rule_loading_messages.h"
 #include <libsinsp/logger.h>
 
+#include <re2/re2.h>
+
 #define THROW(cond, err, ctx)    { if ((cond)) { throw rule_loader::rule_load_exception(falco::load_result::LOAD_ERR_YAML_VALIDATE, (err), (ctx)); } }
+
+// Sinsp Filter grammar tokens taken from "libsinsp/filter/parser.h"
+// These regular expressions are used here to check for invalid macro/list names
+// todo(mrgian): to avoid code duplication we can move regex definitions in libsinsp/filter/parser.h
+// and include it here instead of redefining them.
+#define RGX_IDENTIFIER "([a-zA-Z]+[a-zA-Z0-9_]*)"
+#define RGX_BARESTR    "([^()\"'[:space:]=,]+)"
+
+static re2::RE2 s_rgx_identifier(RGX_IDENTIFIER, re2::RE2::POSIX);
+static re2::RE2 s_rgx_barestr(RGX_BARESTR, re2::RE2::POSIX);
 
 // Don't call this directly, call decode_val/decode_optional_val instead.
 template <typename T>
@@ -314,7 +326,7 @@ static void read_rule_exceptions(
 			rule_loader::context vals_ctx(exvals, rule_loader::context::EXCEPTION_VALUES, "", ex_ctx);
 			THROW(!exvals.IsSequence(),
 			       "Rule exception values must be a sequence", vals_ctx);
-			for (auto &val : exvals)
+			for (const auto &val : exvals)
 			{
 				rule_loader::context vctx(val, rule_loader::context::EXCEPTION_VALUE, "", vals_ctx);
 				rule_loader::rule_exception_info::entry v_ex_val;
@@ -359,9 +371,11 @@ void rule_loader::reader::read_item(
 	const YAML::Node& item,
 	const rule_loader::context& parent)
 {
-	rule_loader::context tmp(item, rule_loader::context::RULES_CONTENT_ITEM, "", parent);
-	THROW(!item.IsMap(), "Unexpected element type. "
-	      "Each element should be a yaml associative array.", tmp);
+	{
+		rule_loader::context tmp(item, rule_loader::context::RULES_CONTENT_ITEM, "", parent);
+		THROW(!item.IsMap(), "Unexpected element type. "
+		      "Each element should be a yaml associative array.", tmp);
+	}
 
 	if (item["required_engine_version"].IsDefined())
 	{
@@ -440,6 +454,10 @@ void rule_loader::reader::read_item(
 		decode_val(item, "list", name, tmp);
 
 		rule_loader::context ctx(item, rule_loader::context::LIST, name, parent);
+
+		bool invalid_name = !re2::RE2::FullMatch(name, s_rgx_barestr);
+		THROW(invalid_name, ERROR_INVALID_LIST_NAME RGX_BARESTR, ctx);
+
 		rule_loader::list_info v(ctx);
 
 		bool append = false;
@@ -480,6 +498,10 @@ void rule_loader::reader::read_item(
 		decode_val(item, "macro", name, tmp);
 
 		rule_loader::context ctx(item, rule_loader::context::MACRO, name, parent);
+
+		bool invalid_name = !re2::RE2::FullMatch(name, s_rgx_identifier);
+		THROW(invalid_name, ERROR_INVALID_MACRO_NAME RGX_IDENTIFIER, ctx);
+
 		rule_loader::macro_info v(ctx);
 		v.name = name;
 
@@ -654,7 +676,7 @@ void rule_loader::reader::read_item(
 			}
 
 			// if any expected key has not been defined throw an error
-			for (auto &key : expected_keys) {
+			for (const auto &key : expected_keys) {
 				rule_loader::context keyctx(item[key], rule_loader::context::OVERRIDE, key, ctx);
 				THROW(true, "Unexpected key '" + key + "': no corresponding entry under 'override' is defined.", keyctx);
 			}

@@ -199,7 +199,7 @@ static falco::app::run_result do_inspect(
 		}
 		else if(rc == SCAP_TIMEOUT)
 		{
-			if(unlikely(ev == nullptr))
+			if(ev == nullptr) [[unlikely]]
 			{
 				timeouts_since_last_success_or_msg++;
 				if(timeouts_since_last_success_or_msg > s.config->m_syscall_evt_timeout_max_consecutives
@@ -326,10 +326,12 @@ static void process_inspector_events(
 		falco::app::state& s,
 		std::shared_ptr<sinsp> inspector,
 		std::shared_ptr<stats_writer> statsw,
-		std::string source, // an empty source represents capture mode
+		const std::string& source, // an empty source represents capture mode
 		source_sync_context* sync,
 		run_result* res) noexcept
 {
+	run_result result;
+
 	try
 	{
 		double duration;
@@ -342,7 +344,7 @@ static void process_inspector_events(
 
 		duration = ((double)clock()) / CLOCKS_PER_SEC;
 
-		*res = do_inspect(s, inspector, source, statsw, sdropmgr, check_drops_timeouts,
+		result = do_inspect(s, inspector, source, statsw, sdropmgr, check_drops_timeouts,
 						uint64_t(s.options.duration_to_tot*ONE_SECOND_IN_NS),
 						num_evts);
 
@@ -373,13 +375,21 @@ static void process_inspector_events(
 	}
 	catch(const std::exception& e)
 	{
-		*res = run_result::fatal(e.what());
+		result = run_result::fatal(e.what());
 	}
 
 	if (sync)
 	{
-		sync->finish();
+		try {
+			sync->finish();
+		}
+		catch(const std::exception& e)
+		{
+			result = run_result::merge(result, run_result::fatal(e.what()));
+		}
 	}
+
+	*res = result;
 }
 
 static falco::app::run_result init_stats_writer(
@@ -478,8 +488,7 @@ falco::app::run_result falco::app::actions::process_events(falco::app::state& s)
 		ctxs.reserve(s.enabled_sources.size());
 		for (const auto& source : s.enabled_sources)
 		{
-			ctxs.emplace_back();
-			auto& ctx = ctxs[ctxs.size() - 1];
+			auto& ctx = ctxs.emplace_back();
 			ctx.source = source;
 			ctx.sync.reset(new source_sync_context(termination_sem));
 			auto src_info = s.source_infos.at(source);

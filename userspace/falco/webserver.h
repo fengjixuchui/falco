@@ -16,13 +16,14 @@ limitations under the License.
 */
 #pragma once
 
-#define CPPHTTPLIB_OPENSSL_SUPPORT
-#define CPPHTTPLIB_ZLIB_SUPPORT
-#include <httplib.h>
-#include <thread>
-#include <memory>
-#include <libsinsp/sinsp.h>
 #include "configuration.h"
+
+#include <libsinsp/sinsp.h>
+
+#include <httplib.h>
+
+#include <memory>
+#include <thread>
 
 class falco_webserver
 {
@@ -45,6 +46,6 @@ public:
 
 private:
 	bool m_running = false;
-	httplib::Server* m_server = NULL;
+	std::unique_ptr<httplib::Server> m_server = nullptr;
 	std::thread m_server_thread;
 };

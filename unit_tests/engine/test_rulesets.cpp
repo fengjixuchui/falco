@@ -23,41 +23,39 @@ limitations under the License.
 #define RULESET_2 2
 
 /* Helpers methods */
-static std::shared_ptr<sinsp_filter_factory> create_factory(filter_check_list& list)
+static std::shared_ptr<sinsp_filter_factory> create_factory(sinsp* inspector, filter_check_list& list)
 {
-	std::shared_ptr<sinsp_filter_factory> ret(new sinsp_filter_factory(NULL, list));
-	return ret;
+	return std::make_shared<sinsp_filter_factory>(inspector, list);
 }
 
 static std::shared_ptr<filter_ruleset> create_ruleset(std::shared_ptr<sinsp_filter_factory> f)
 {
-	std::shared_ptr<filter_ruleset> ret(new evttype_index_ruleset(f));
-	return ret;
+	return std::make_shared<evttype_index_ruleset>(f);
 }
 
 static std::shared_ptr<libsinsp::filter::ast::expr> create_ast(std::shared_ptr<sinsp_filter_factory> f)
 {
 	libsinsp::filter::parser parser("evt.type=open");
-	std::shared_ptr<libsinsp::filter::ast::expr> ret(parser.parse());
-	return ret;
+	return parser.parse();
 }
 
 static std::shared_ptr<sinsp_filter> create_filter(
 	std::shared_ptr<sinsp_filter_factory> f,
-	std::shared_ptr<libsinsp::filter::ast::expr> ast)
+	libsinsp::filter::ast::expr* ast)
 {
-	sinsp_filter_compiler compiler(f, ast.get());
-	std::shared_ptr<sinsp_filter> filter(compiler.compile());
-	return filter;
+	sinsp_filter_compiler compiler(f, ast);
+	return std::shared_ptr<sinsp_filter>(compiler.compile());
 }
 
 TEST(Ruleset, enable_disable_rules_using_names)
 {
+	sinsp inspector;
+
 	sinsp_filter_check_list filterlist;
-	auto f = create_factory(filterlist);
+	auto f = create_factory(&inspector, filterlist);
 	auto r = create_ruleset(f);
 	auto ast = create_ast(f);
-	auto filter = create_filter(f, ast);
+	auto filter = create_filter(f, ast.get());
 
 	falco_rule rule_A = {};
 	rule_A.name = "rule_A";
@@ -120,11 +118,13 @@ TEST(Ruleset, enable_disable_rules_using_names)
 
 TEST(Ruleset, enable_disable_rules_using_tags)
 {
+	sinsp inspector;
+
 	sinsp_filter_check_list filterlist;
-	auto f = create_factory(filterlist);
+	auto f = create_factory(&inspector, filterlist);
 	auto r = create_ruleset(f);
 	auto ast = create_ast(f);
-	auto filter = create_filter(f, ast);
+	auto filter = create_filter(f, ast.get());
 
 	falco_rule rule_A = {};
 	rule_A.name = "rule_A";

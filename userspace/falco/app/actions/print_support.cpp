@@ -98,7 +98,6 @@ falco::app::run_result falco::app::actions::print_support(falco::app::state& s)
 	if(s.options.print_support)
 	{
 		nlohmann::json support;
-		std::string cmdline;
 
 		if(get_sysinfo(support) != 0)
 		{
@@ -111,7 +110,7 @@ falco::app::run_result falco::app::actions::print_support(falco::app::state& s)
 		support["cmdline"] = s.cmdline;
 		support["config"] = read_file(s.options.conf_filename);
 		support["rules_files"] = nlohmann::json::array();
-		for(auto filename : s.config->m_loaded_rules_filenames)
+		for(const auto& filename : s.config->m_loaded_rules_filenames)
 		{
 			nlohmann::json finfo;
 			finfo["name"] = filename;

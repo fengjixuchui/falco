@@ -28,6 +28,8 @@ limitations under the License.
 //
 #define DEFAULT_OUTPUTS_QUEUE_CAPACITY_UNBOUNDED_MAX_LONG_VALUE std::ptrdiff_t(~size_t(0) / 2)
 
+#define DEFAULT_FALCO_LIBS_THREAD_TABLE_SIZE 262144
+
 //
 // Most falco_* classes can throw exceptions. Unless directly related
 // to low-level failures like inability to open file, etc, they will
@@ -57,8 +59,8 @@ namespace falco_common
 		PRIORITY_DEBUG = 7
 	};
 	
-	bool parse_priority(std::string v, priority_type& out);
-	priority_type parse_priority(std::string v);
+	bool parse_priority(const std::string& v, priority_type& out);
+	priority_type parse_priority(const std::string& v);
 	bool format_priority(priority_type v, std::string& out, bool shortfmt=false);
 	std::string format_priority(priority_type v, bool shortfmt=false);
 
@@ -68,5 +70,5 @@ namespace falco_common
 		ALL = 1
 	};
 
-	bool parse_rule_matching(std::string v, rule_matching& out);
+	bool parse_rule_matching(const std::string& v, rule_matching& out);
 };

@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.5.1)
 
 project(falco)
 
-option(USE_BUNDLED_DEPS "Bundle hard to find dependencies into the Falco binary" OFF)
+option(USE_BUNDLED_DEPS "Bundle hard to find dependencies into the Falco binary" ON)
 option(USE_DYNAMIC_LIBELF "Dynamically link libelf" ON)
 option(BUILD_WARNINGS_AS_ERRORS "Enable building with -Wextra -Werror flags" OFF)
 option(MINIMAL_BUILD "Build a minimal version of Falco, containing only the engine and basic input/output (EXPERIMENTAL)" OFF)
@@ -23,6 +23,11 @@ option(MUSL_OPTIMIZED_BUILD "Enable if you want a musl optimized build" OFF)
 option(BUILD_FALCO_UNIT_TESTS "Build falco unit tests" OFF)
 
 if(WIN32)
+  if(POLICY CMP0091)
+    # Needed for CMAKE_MSVC_RUNTIME_LIBRARY
+    # https://cmake.org/cmake/help/latest/policy/CMP0091.html
+    cmake_policy(SET CMP0091 NEW)
+  endif()
 	set(CPACK_GENERATOR "NSIS") # this needs NSIS installed, and available
 elseif (APPLE)
 	set(CPACK_GENERATOR "DragNDrop")
@@ -179,7 +184,6 @@ include(rules)
 include(static-analysis)
 
 # Shared build variables
-set(FALCO_SINSP_LIBRARY sinsp)
 set(FALCO_SHARE_DIR share/falco)
 set(FALCO_ABSOLUTE_SHARE_DIR "${CMAKE_INSTALL_PREFIX}/${FALCO_SHARE_DIR}")
 set(FALCO_BIN_DIR bin)

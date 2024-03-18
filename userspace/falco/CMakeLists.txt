@@ -14,8 +14,7 @@
 
 configure_file(config_falco.h.in config_falco.h)
 
-set(
-  FALCO_SOURCES
+add_library(falco_application STATIC
   app/app.cpp
   app/options.cpp
   app/restart_handler.cpp
@@ -62,15 +61,11 @@ set(
 set(
   FALCO_INCLUDE_DIRECTORIES
   "${PROJECT_SOURCE_DIR}/userspace/engine"
-  "${PROJECT_BINARY_DIR}/userspace/falco"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_CURRENT_BINARY_DIR}"
   "${PROJECT_BINARY_DIR}/driver/src"
   "${CXXOPTS_INCLUDE_DIR}"
-  "${YAMLCPP_INCLUDE_DIR}"
-  "${CMAKE_CURRENT_BINARY_DIR}"
-  "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-
-list(APPEND FALCO_INCLUDE_DIRECTORIES "${FALCO_EXTRA_INCLUDE_DIRS}")
 
 set(
   FALCO_DEPENDENCIES
@@ -81,24 +76,20 @@ set(
   FALCO_LIBRARIES
   falco_engine
   sinsp
-  "${YAMLCPP_LIB}"
+  yaml-cpp
 )
-
-if(USE_BUNDLED_DEPS)
-  list(APPEND FALCO_DEPENDENCIES yamlcpp)
-endif()
 
 if(NOT WIN32)
-  list(
-    APPEND FALCO_SOURCES
-	outputs_program.cpp
-	outputs_syslog.cpp
-)
+  target_sources(falco_application
+  PRIVATE
+    outputs_program.cpp
+    outputs_syslog.cpp
+  )
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
-  list(
-    APPEND FALCO_SOURCES
+  target_sources(falco_application
+  PRIVATE
     outputs_grpc.cpp
     outputs_http.cpp
     webserver.cpp
@@ -117,7 +108,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
 
   list(
     APPEND FALCO_INCLUDE_DIRECTORIES
-    "${CPPHTTPLIB_INCLUDE}"
     "${OPENSSL_INCLUDE_DIR}"
     "${GRPC_INCLUDE}"
     "${GRPCPP_INCLUDE}"
@@ -130,28 +120,23 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
     list(APPEND FALCO_LIBRARIES "${GRPC_LIBRARIES}")
   endif()
 
-  list(APPEND FALCO_DEPENDENCIES cpp-httplib)
-
   list(
     APPEND FALCO_LIBRARIES
+    httplib::httplib
     "${GRPCPP_LIB}"
     "${GRPC_LIB}"
     "${GPR_LIB}"
     "${PROTOBUF_LIB}"
     "${CARES_LIB}"
     "${OPENSSL_LIBRARIES}"
-    "${YAMLCPP_LIB}"
   )
 endif()
-
-add_library(
-  falco_application STATIC
-  ${FALCO_SOURCES}
-)
 
 if (EMSCRIPTEN)
 	target_compile_options(falco_application PRIVATE "-sDISABLE_EXCEPTION_CATCHING=0")
 endif()
+
+target_compile_definitions(falco_application PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 
 add_dependencies(falco_application ${FALCO_DEPENDENCIES})
 

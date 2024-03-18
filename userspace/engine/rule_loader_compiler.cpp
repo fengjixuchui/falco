@@ -76,6 +76,7 @@ static void build_rule_exception_infos(
 	std::string& condition)
 {
 	std::string tmp;
+	condition = "(" + condition + ")";
 	for (const auto &ex : exceptions)
 	{
 		std::string icond;
@@ -342,35 +343,35 @@ void rule_loader::compiler::compile_list_infos(
 		const collector& col,
 		indexed_vector<falco_list>& out) const
 {
-	std::list<std::string> used;
-	falco_list v;
+	std::list<std::string> used_names;
+	falco_list infos;
 	for (const auto &list : col.lists())
 	{
-		v.name = list.name;
-		v.items.clear();
+		infos.name = list.name;
+		infos.items.clear();
 		for (const auto &item : list.items)
 		{
 			const auto ref = col.lists().at(item);
 			if (ref && ref->index < list.visibility)
 			{
-				used.push_back(ref->name);
+				used_names.push_back(ref->name);
 				for (const auto &val : ref->items)
 				{
-					v.items.push_back(val);
+					infos.items.push_back(val);
 				}
 			}
 			else
 			{
-				v.items.push_back(item);
+				infos.items.push_back(item);
 			}
 		}
-		v.used = false;
-		auto list_id = out.insert(v, v.name);
+		infos.used = false;
+		auto list_id = out.insert(infos, infos.name);
 		out.at(list_id)->id = list_id;
 	}
-	for (const auto &v : used)
+	for (const auto &name : used_names)
 	{
-		out.at(v)->used = true;
+		out.at(name)->used = true;
 	}
 }
 
@@ -394,7 +395,7 @@ void rule_loader::compiler::compile_macros_infos(
 	filter_macro_resolver macro_resolver;
 	for (auto &m : out)
 	{
-		auto info = macro_info_from_name(col, m.name);
+		const auto* info = macro_info_from_name(col, m.name);
 		resolve_macros(macro_resolver, col.macros(), out, m.condition, info->cond, info->visibility, info->ctx);
 	}
 }
@@ -439,7 +440,7 @@ bool rule_loader::compiler::compile_condition(
 	sinsp_filter_compiler compiler(filter_factory, ast_out.get());
 	try
 	{
-		filter_out.reset(compiler.compile());
+		filter_out = compiler.compile();
 	}
 	catch(const sinsp_exception& e)
 	{

@@ -120,7 +120,7 @@ static std::string fieldclass_key(const sinsp_filter_factory::filter_fieldclass_
 	return fld_info.name + fld_info.shortdesc;
 }
 
-void falco_engine::list_fields(std::string &source, bool verbose, bool names_only, bool markdown) const
+void falco_engine::list_fields(const std::string &source, bool verbose, bool names_only, bool markdown) const
 {
 	// Maps from field class name + short desc to list of event
 	// sources for which this field class can be used.
@@ -360,7 +360,7 @@ uint64_t falco_engine::num_rules_for_ruleset(const std::string &ruleset)
 	return ret;
 }
 
-void falco_engine::evttypes_for_ruleset(std::string &source, std::set<uint16_t> &evttypes, const std::string &ruleset)
+void falco_engine::evttypes_for_ruleset(const std::string &source, std::set<uint16_t> &evttypes, const std::string &ruleset)
 {
 	find_source(source)->ruleset->enabled_evttypes(evttypes, find_ruleset_id(ruleset));
 }
@@ -422,7 +422,7 @@ std::unique_ptr<std::vector<falco_engine::rule_result>> falco_engine::process_ev
 	}
 
 	auto res = std::make_unique<std::vector<falco_engine::rule_result>>();
-	for(auto rule : source->m_rules)
+	for(const auto& rule : source->m_rules)
 	{
 		rule_result rule_result;
 		rule_result.evt = ev;
@@ -450,9 +450,8 @@ std::size_t falco_engine::add_source(const std::string &source,
 				     std::shared_ptr<sinsp_evt_formatter_factory> formatter_factory)
 {
 	// evttype_index_ruleset is the default ruleset implementation
-	std::shared_ptr<filter_ruleset_factory> ruleset_factory(
-		new evttype_index_ruleset_factory(filter_factory));
-	size_t idx = add_source(source, filter_factory, formatter_factory, ruleset_factory);
+	size_t idx = add_source(source, filter_factory, formatter_factory,
+	                        std::make_shared<evttype_index_ruleset_factory>(filter_factory));
 
 	if(source == falco_common::syscall_source)
 	{
@@ -486,7 +485,7 @@ template <typename T> inline nlohmann::json sequence_to_json_array(const T& seq)
 	return ret;
 }
 
-nlohmann::json falco_engine::describe_rule(std::string *rule, const std::vector<std::shared_ptr<sinsp_plugin>>& plugins) const
+nlohmann::json falco_engine::describe_rule(std::string *rule_name, const std::vector<std::shared_ptr<sinsp_plugin>>& plugins) const
 {
 	// use previously-loaded collector definitions and the compiled
 	// output of rules, macros, and lists.
@@ -497,7 +496,7 @@ nlohmann::json falco_engine::describe_rule(std::string *rule, const std::vector<
 
 	// use collected and compiled info to print a json output
 	nlohmann::json output;
-	if(!rule)
+	if(!rule_name)
 	{
 		// Store required engine version
 		auto required_engine_version = m_rule_collector->required_engine_version();
@@ -528,51 +527,51 @@ nlohmann::json falco_engine::describe_rule(std::string *rule, const std::vector<
 
 		// Store information about rules
 		nlohmann::json rules_array = nlohmann::json::array();
-		for(const auto& r : m_last_compile_output->rules)
+		for(const auto& rule : m_last_compile_output->rules)
 		{
-			auto info = m_rule_collector->rules().at(r.name);
-			nlohmann::json rule;
-			get_json_details(rule, r, *info, plugins);
-			rules_array.push_back(std::move(rule));
+			auto info = m_rule_collector->rules().at(rule.name);
+			nlohmann::json details;
+			get_json_details(details, rule, *info, plugins);
+			rules_array.push_back(std::move(details));
 		}
 		output["rules"] = std::move(rules_array);
 
 		// Store information about macros
 		nlohmann::json macros_array = nlohmann::json::array();
-		for(const auto &m : m_last_compile_output->macros)
+		for(const auto &macro : m_last_compile_output->macros)
 		{
-			auto info = m_rule_collector->macros().at(m.name);
-			nlohmann::json macro;
-			get_json_details(macro, m, *info, plugins);
-			macros_array.push_back(std::move(macro));
+			auto info = m_rule_collector->macros().at(macro.name);
+			nlohmann::json details;
+			get_json_details(details, macro, *info, plugins);
+			macros_array.push_back(std::move(details));
 		}
 		output["macros"] = std::move(macros_array);
 
 		// Store information about lists
 		nlohmann::json lists_array = nlohmann::json::array();
-		for(const auto &l : m_last_compile_output->lists)
+		for(const auto &list : m_last_compile_output->lists)
 		{
-			auto info = m_rule_collector->lists().at(l.name);
-			nlohmann::json list;
-			get_json_details(list, l, *info, plugins);
-			lists_array.push_back(std::move(list));
+			auto info = m_rule_collector->lists().at(list.name);
+			nlohmann::json details;
+			get_json_details(details, list, *info, plugins);
+			lists_array.push_back(std::move(details));
 		}
 		output["lists"] = std::move(lists_array);
 	}
 	else
 	{
 		// build json information for just the specified rule
-		auto ri = m_rule_collector->rules().at(*rule);
+		auto ri = m_rule_collector->rules().at(*rule_name);
 		if(ri == nullptr || ri->unknown_source)
 		{
-			throw falco_exception("Rule \"" + *rule + "\" is not loaded");
+			throw falco_exception("Rule \"" + *rule_name + "\" is not loaded");
 		}
-		auto r = m_rules.at(ri->name);
+		auto rule = m_rules.at(ri->name);
 
-		nlohmann::json rule;
-		get_json_details(rule, *r, *ri, plugins);
+		nlohmann::json details;
+		get_json_details(details, *rule, *ri, plugins);
 		nlohmann::json rules_array = nlohmann::json::array();
-		rules_array.push_back(std::move(rule));
+		rules_array.push_back(std::move(details));
 		output["rules"] = std::move(rules_array);
 	}
 
@@ -689,13 +688,13 @@ void falco_engine::get_json_details(
 
 void falco_engine::get_json_details(
 	nlohmann::json& out,
-	const falco_macro& m,
+	const falco_macro& macro,
 	const rule_loader::macro_info& info,
 	const std::vector<std::shared_ptr<sinsp_plugin>>& plugins) const
 {
 	nlohmann::json macro_info;
 
-	macro_info["name"] = m.name;
+	macro_info["name"] = macro.name;
 	macro_info["condition"] = info.cond;
 	out["info"] = std::move(macro_info);
 
@@ -718,9 +717,9 @@ void falco_engine::get_json_details(
 		compiled_details.known_lists.insert(l.name);
 	}
 	filter_details_resolver().run(ast.get(), details);
-	filter_details_resolver().run(m.condition.get(), compiled_details);
+	filter_details_resolver().run(macro.condition.get(), compiled_details);
 
-	out["details"]["used"] = m.used;
+	out["details"]["used"] = macro.used;
 	out["details"]["macros"] = sequence_to_json_array(details.macros);
 	out["details"]["lists"] = sequence_to_json_array(details.lists);
 	out["details"]["condition_operators"] = sequence_to_json_array(compiled_details.operators);
@@ -728,11 +727,11 @@ void falco_engine::get_json_details(
 
 	// Store event types
 	nlohmann::json events;
-	get_json_evt_types(events, "", m.condition.get());
+	get_json_evt_types(events, "", macro.condition.get());
 	out["details"]["events"] = std::move(events);
 
 	// Store compiled condition
-	out["details"]["condition_compiled"] = libsinsp::filter::ast::as_string(m.condition.get());
+	out["details"]["condition_compiled"] = libsinsp::filter::ast::as_string(macro.condition.get());
 
 	// Compute the plugins that are actually used by this macro.
 	// Note: macros have no specific source, we need to set an empty list of used
@@ -1025,7 +1024,7 @@ void falco_engine::fill_engine_state_funcs(filter_ruleset::engine_state_funcs &e
 {
 	engine_state.get_ruleset = [this](const std::string &source_name, std::shared_ptr<filter_ruleset> &ruleset) -> bool
 	{
-		falco_source *src = m_sources.at(source_name);
+		const falco_source *src = m_sources.at(source_name);
 		if(src == nullptr)
 		{
 			return false;
@@ -1055,7 +1054,7 @@ void falco_engine::set_sampling_multiplier(double sampling_multiplier)
 	m_sampling_multiplier = sampling_multiplier;
 }
 
-void falco_engine::set_extra(std::string &extra, bool replace_container_info)
+void falco_engine::set_extra(const std::string &extra, bool replace_container_info)
 {
 	m_extra = extra;
 	m_replace_container_info = replace_container_info;

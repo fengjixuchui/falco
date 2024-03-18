@@ -64,7 +64,7 @@ public:
 
 	// Print to stdout (using printf) a description of each field supported by this engine.
 	// If source is non-empty, only fields for the provided source are printed.
-	void list_fields(std::string &source, bool verbose, bool names_only, bool markdown) const;
+	void list_fields(const std::string &source, bool verbose, bool names_only, bool markdown) const;
 
 	// Provide an alternate rule reader, collector, and compiler
 	// to compile any rules provided via load_rules*
@@ -141,7 +141,7 @@ public:
 	// Print details on the given rule. If rule is NULL, print
 	// details on all rules.
 	//
-	nlohmann::json describe_rule(std::string *rule, const std::vector<std::shared_ptr<sinsp_plugin>>& plugins) const;
+	nlohmann::json describe_rule(std::string *rule_name, const std::vector<std::shared_ptr<sinsp_plugin>>& plugins) const;
 
 	//
 	// Print statistics on how many events matched each rule.
@@ -168,7 +168,7 @@ public:
 	// add k8s/container information to outputs when
 	// available.
 	//
-	void set_extra(std::string &extra, bool replace_container_info);
+	void set_extra(const std::string &extra, bool replace_container_info);
 
 	// Represents the result of matching an event against a set of
 	// rules.
@@ -271,7 +271,7 @@ public:
 	// typing-improved `enabled_event_codes` and `enabled_sc_codes` instead
 	// todo(jasondellaluce): remove this in future code refactors
 	//
-	void evttypes_for_ruleset(std::string &source,
+	void evttypes_for_ruleset(const std::string &source,
 				  std::set<uint16_t> &evttypes,
 				  const std::string &ruleset = s_default_ruleset);
 

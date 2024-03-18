@@ -23,18 +23,18 @@ limitations under the License.
 using namespace falco::app;
 using namespace falco::app::actions;
 
-falco::app::run_result falco::app::actions::print_plugin_info(falco::app::state& s)
+falco::app::run_result falco::app::actions::print_plugin_info(const falco::app::state& s)
 {
 	if(!s.options.print_plugin_info.empty())
 	{
-		std::unique_ptr<sinsp> inspector(new sinsp());
+		sinsp inspector;
 		for(auto &pc : s.config->m_plugins)
 		{
 			if (pc.m_name == s.options.print_plugin_info
 				|| pc.m_library_path == s.options.print_plugin_info)
 			{
 				// load the plugin
-				auto p = inspector->register_plugin(pc.m_library_path);
+				auto p = inspector.register_plugin(pc.m_library_path);
 
 				// print plugin descriptive info
 				std::ostringstream os;
@@ -61,7 +61,7 @@ falco::app::run_result falco::app::actions::print_plugin_info(falco::app::state&
 				os << schema << std::endl;
 				os << std::endl;
 				printf("%s", os.str().c_str());
-				
+
 				// init the plugin
 				std::string err;
 				if (!p->init(pc.m_init_config, err))
@@ -83,7 +83,7 @@ falco::app::run_result falco::app::actions::print_plugin_info(falco::app::state&
 					else
 					{
 						os << "Suggested open params:" << std::endl;
-						for(auto &oparam : p->list_open_params())
+						for(const auto &oparam : p->list_open_params())
 						{
 							if(oparam.desc == "")
 							{
